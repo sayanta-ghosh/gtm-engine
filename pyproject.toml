@@ -1,0 +1,51 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "gtm-engine"
+version = "0.1.0"
+description = "GTM Engine - AI-native go-to-market toolkit with secure API vault"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+authors = [
+    {name = "nRev", email = "eng@nrev.ai"},
+]
+keywords = ["gtm", "enrichment", "sales", "claude", "mcp", "vault"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Topic :: Office/Business",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "cryptography>=41.0",
+    "requests>=2.31",
+    "fastapi>=0.104",
+    "uvicorn>=0.24",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.6",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+composio = ["composio-core>=0.3"]
+dev = ["pytest>=7.0", "httpx"]
+all = ["gtm-engine[composio,dev]"]
+
+[project.scripts]
+gtm = "cli.main:cli"
+
+[project.urls]
+Homepage = "https://nrev.ai"
+Repository = "https://github.com/nrev-ai/gtm-engine"
+Documentation = "https://docs.nrev.ai/gtm-engine"
+
+[tool.hatch.build.targets.wheel]
+packages = ["vault", "cli", "dashboard"]
