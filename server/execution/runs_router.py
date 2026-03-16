@@ -1,0 +1,228 @@
+"""Runs API — list workflows and their steps for the run logs dashboard."""
+
+from __future__ import annotations
+
+import logging
+from typing import Any, Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import JSONResponse
+from jose import JWTError, jwt
+from sqlalchemy import desc, func, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from server.auth.models import Tenant
+from server.core.config import settings
+from server.core.database import get_db, set_tenant_context
+from server.execution.run_models import RunStep
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/api/v1", tags=["runs"])
+
+_COOKIE_NAME = "nrv_session"
+
+
+async def _get_tenant_flexible(
+    request: Request,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> tuple[Tenant, AsyncSession]:
+    """Authenticate via Bearer token, session cookie, or query param.
+
+    Supports both MCP client (Bearer) and dashboard (cookie) callers.
+    """
+    jwt_token: str | None = None
+
+    # 1. Authorization header (MCP client / API)
+    auth_header = request.headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        jwt_token = auth_header.removeprefix("Bearer ")
+
+    # 2. Cookie (dashboard browser sessions)
+    if not jwt_token:
+        jwt_token = request.cookies.get(_COOKIE_NAME)
+
+    # 3. Query param (legacy)
+    if not jwt_token and token:
+        jwt_token = token
+
+    if not jwt_token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required",
+        )
+
+    try:
+        payload = jwt.decode(
+            jwt_token,
+            settings.JWT_SECRET_KEY,
+            algorithms=[settings.JWT_ALGORITHM],
+        )
+    except JWTError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session expired. Please sign in again.",
+        )
+
+    tenant_id: str | None = payload.get("tenant_id")
+    if not tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid session",
+        )
+
+    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
+    tenant = result.scalar_one_or_none()
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant not found",
+        )
+
+    await set_tenant_context(db, tenant.id)
+    return tenant, db
+
+
+@router.get("/runs")
+async def list_workflows(
+    request: Request,
+    limit: int = Query(20, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """List workflows (grouped run sessions) for this tenant.
+
+    Each workflow represents a Claude Code session. Returns aggregated
+    stats: step count, total credits, duration, status summary.
+    """
+    tenant, db = await _get_tenant_flexible(request, token=token, db=db)
+
+    # Query: aggregate run_steps grouped by workflow_id
+    stmt = (
+        select(
+            RunStep.workflow_id,
+            func.count(RunStep.id).label("step_count"),
+            func.sum(RunStep.credits_charged).label("total_credits"),
+            func.sum(RunStep.duration_ms).label("total_duration_ms"),
+            func.min(RunStep.created_at).label("started_at"),
+            func.max(RunStep.created_at).label("last_step_at"),
+            func.count(RunStep.id).filter(RunStep.status == "success").label("success_count"),
+            func.count(RunStep.id).filter(RunStep.status == "failed").label("failed_count"),
+            # Collect distinct tool names as a pseudo-summary
+            func.array_agg(func.distinct(RunStep.tool_name)).label("tools_used"),
+        )
+        .where(RunStep.tenant_id == tenant.id)
+        .group_by(RunStep.workflow_id)
+        .order_by(desc(text("last_step_at")))
+        .limit(limit)
+        .offset(offset)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    workflows = []
+    for row in rows:
+        total = row.step_count or 0
+        success = row.success_count or 0
+        failed = row.failed_count or 0
+
+        if failed > 0 and success == 0:
+            wf_status = "failed"
+        elif failed > 0:
+            wf_status = "partial"
+        else:
+            wf_status = "success"
+
+        workflows.append({
+            "workflow_id": row.workflow_id,
+            "step_count": total,
+            "success_count": success,
+            "failed_count": failed,
+            "status": wf_status,
+            "total_credits": float(row.total_credits or 0),
+            "total_duration_ms": row.total_duration_ms or 0,
+            "started_at": row.started_at.isoformat() if row.started_at else None,
+            "last_step_at": row.last_step_at.isoformat() if row.last_step_at else None,
+            "tools_used": row.tools_used or [],
+        })
+
+    # Get total count for pagination
+    count_stmt = (
+        select(func.count(func.distinct(RunStep.workflow_id)))
+        .where(RunStep.tenant_id == tenant.id)
+    )
+    total_count = await db.scalar(count_stmt) or 0
+
+    return JSONResponse({
+        "workflows": workflows,
+        "total": total_count,
+        "limit": limit,
+        "offset": offset,
+    })
+
+
+@router.get("/runs/{workflow_id}")
+async def get_workflow_steps(
+    request: Request,
+    workflow_id: str,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> JSONResponse:
+    """Get all steps for a specific workflow, ordered chronologically."""
+    tenant, db = await _get_tenant_flexible(request, token=token, db=db)
+
+    stmt = (
+        select(RunStep)
+        .where(
+            RunStep.tenant_id == tenant.id,
+            RunStep.workflow_id == workflow_id,
+        )
+        .order_by(RunStep.created_at)
+    )
+    result = await db.execute(stmt)
+    steps = result.scalars().all()
+
+    if not steps:
+        return JSONResponse(
+            {"error": f"Workflow '{workflow_id}' not found"},
+            status_code=404,
+        )
+
+    step_list = []
+    total_credits = 0.0
+    total_duration = 0
+
+    for step in steps:
+        credits = float(step.credits_charged or 0)
+        duration = step.duration_ms or 0
+        total_credits += credits
+        total_duration += duration
+
+        step_list.append({
+            "id": str(step.id),
+            "tool_name": step.tool_name,
+            "operation": step.operation,
+            "provider": step.provider,
+            "params_summary": step.params_summary or {},
+            "result_summary": step.result_summary or {},
+            "status": step.status,
+            "error_message": step.error_message,
+            "credits_charged": credits,
+            "duration_ms": duration,
+            "created_at": step.created_at.isoformat() if step.created_at else None,
+        })
+
+    return JSONResponse({
+        "workflow_id": workflow_id,
+        "steps": step_list,
+        "summary": {
+            "step_count": len(step_list),
+            "total_credits": total_credits,
+            "total_duration_ms": total_duration,
+            "started_at": step_list[0]["created_at"] if step_list else None,
+            "last_step_at": step_list[-1]["created_at"] if step_list else None,
+        },
+    })

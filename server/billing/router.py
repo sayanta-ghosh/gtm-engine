@@ -1,0 +1,82 @@
+"""Credits router: balance, history, and top-up endpoints."""
+
+from __future__ import annotations
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from server.auth.dependencies import get_current_tenant
+from server.auth.models import Tenant
+from server.core.database import get_db
+from server.billing.schemas import (
+    CreditBalanceResponse,
+    CreditHistoryResponse,
+    LedgerEntryResponse,
+    TopupRequest,
+    TopupResponse,
+)
+from server.billing.service import get_balance, get_history
+
+router = APIRouter(prefix="/api/v1", tags=["credits"])
+
+# ---------------------------------------------------------------------------
+# Endpoints
+# ---------------------------------------------------------------------------
+
+
+@router.get("/credits", response_model=CreditBalanceResponse)
+async def get_credit_balance(
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> CreditBalanceResponse:
+    """Return the current credit balance for the tenant."""
+    balance_info = await get_balance(db, tenant.id)
+    return CreditBalanceResponse(
+        tenant_id=tenant.id,
+        balance=balance_info["balance"],
+        spend_this_month=balance_info["spend_this_month"],
+    )
+
+
+@router.get("/credits/history", response_model=CreditHistoryResponse)
+async def get_credit_history(
+    limit: int = 50,
+    offset: int = 0,
+    tenant: Tenant = Depends(get_current_tenant),
+    db: AsyncSession = Depends(get_db),
+) -> CreditHistoryResponse:
+    """Return the credit transaction history for the tenant."""
+    entries, total = await get_history(db, tenant.id, limit=limit, offset=offset)
+    return CreditHistoryResponse(
+        entries=[
+            LedgerEntryResponse(
+                id=e.id,
+                entry_type=e.entry_type,
+                amount=float(e.amount),
+                balance_after=float(e.balance_after),
+                operation=e.operation,
+                reference_id=e.reference_id,
+                description=e.description,
+                created_at=e.created_at,
+            )
+            for e in entries
+        ],
+        total=total,
+    )
+
+
+@router.post("/credits/topup", response_model=TopupResponse)
+async def initiate_topup(
+    body: TopupRequest,
+    tenant: Tenant = Depends(get_current_tenant),
+) -> TopupResponse:
+    """Initiate a Stripe checkout session for credit top-up.
+
+    This is a stub that returns a mock checkout URL.
+    Real Stripe integration will be added when STRIPE_SECRET_KEY is configured.
+    """
+    # Stub - return mock checkout data
+    return TopupResponse(
+        checkout_url=f"https://checkout.stripe.com/mock/{body.package}",
+        session_id=f"cs_mock_{body.package}",
+    )

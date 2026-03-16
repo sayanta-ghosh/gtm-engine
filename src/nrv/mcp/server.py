@@ -1,0 +1,1029 @@
+"""
+nrv MCP Server — expose nrv capabilities as tools for Claude.
+
+Implements the Model Context Protocol (MCP) over stdin/stdout using JSON-RPC 2.0.
+Tries to use the official `mcp` SDK if available; otherwise falls back to a
+lightweight built-in implementation that speaks the same wire protocol.
+
+Usage:
+    python -m nrv.mcp.server
+
+Or register in .mcp.json:
+    {
+      "mcpServers": {
+        "nrv": {
+          "command": "python3",
+          "args": ["-m", "nrv.mcp.server"]
+        }
+      }
+    }
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import sys
+import uuid
+from pathlib import Path
+from typing import Any
+
+import httpx
+
+from nrv.client.auth import load_credentials, refresh_token_if_needed, get_token
+from nrv.utils.config import get_api_base_url
+
+# ---------------------------------------------------------------------------
+# Logging — write to ~/.nrv/mcp_server.log so stdout stays clean for JSON-RPC
+# ---------------------------------------------------------------------------
+
+_LOG_DIR = Path.home() / ".nrv"
+_LOG_DIR.mkdir(parents=True, exist_ok=True)
+
+logger = logging.getLogger("nrv.mcp")
+_handler = logging.FileHandler(_LOG_DIR / "mcp_server.log")
+_handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+logger.addHandler(_handler)
+logger.setLevel(logging.INFO)
+
+# ---------------------------------------------------------------------------
+# Constants
+# ---------------------------------------------------------------------------
+
+SERVER_NAME = "nrv"
+SERVER_VERSION = "0.1.0"
+PROTOCOL_VERSION = "2024-11-05"
+
+# Unique ID for this MCP server session — groups all tool calls into one workflow
+WORKFLOW_ID = str(uuid.uuid4())
+
+# ---------------------------------------------------------------------------
+# HTTP helpers — thin wrapper around the nrv server API
+# ---------------------------------------------------------------------------
+
+
+def _get_auth_headers() -> dict[str, str]:
+    """Return Authorization header, refreshing the token if needed."""
+    token = refresh_token_if_needed() or get_token()
+    if token:
+        return {"Authorization": f"Bearer {token}"}
+    return {}
+
+
+def _api_url(path: str) -> str:
+    """Build a full API URL."""
+    base = get_api_base_url().rstrip("/")
+    return f"{base}/api/v1{path}"
+
+
+_current_tool_name: str = ""  # Set by the dispatcher before each handler call
+
+
+def _api_request(
+    method: str,
+    path: str,
+    *,
+    json_body: dict | None = None,
+    params: dict | None = None,
+    timeout: float = 60,
+) -> dict[str, Any]:
+    """Make an authenticated request to the nrv server API.
+
+    Returns the parsed JSON response or an error dict.
+    Includes X-Workflow-Id and X-Tool-Name headers so the server can
+    log this call as a run step in the workflow.
+    """
+    headers = _get_auth_headers()
+    if not headers:
+        return {"error": "Not authenticated. Run `nrv auth login` first."}
+
+    # Add workflow tracking headers
+    headers["X-Workflow-Id"] = WORKFLOW_ID
+    if _current_tool_name:
+        headers["X-Tool-Name"] = _current_tool_name
+
+    url = _api_url(path)
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.request(
+                method,
+                url,
+                headers=headers,
+                json=json_body,
+                params=params,
+            )
+
+        if resp.status_code == 401:
+            # Try one refresh
+            new_token = refresh_token_if_needed()
+            if new_token:
+                headers["Authorization"] = f"Bearer {new_token}"
+                with httpx.Client(timeout=timeout) as client:
+                    resp = client.request(
+                        method,
+                        url,
+                        headers=headers,
+                        json=json_body,
+                        params=params,
+                    )
+            if resp.status_code == 401:
+                return {"error": "Session expired. Run `nrv auth login` to re-authenticate."}
+
+        if resp.status_code == 204:
+            return {"status": "ok"}
+
+        try:
+            data = resp.json()
+        except Exception:
+            data = {"raw": resp.text}
+
+        if resp.status_code >= 400:
+            msg = ""
+            if isinstance(data, dict):
+                msg = data.get("message") or data.get("detail") or data.get("error", "")
+            return {"error": msg or f"HTTP {resp.status_code}", "status_code": resp.status_code}
+
+        return data
+
+    except httpx.ConnectError:
+        return {"error": f"Cannot connect to nrv server at {url}. Is the server running?"}
+    except httpx.HTTPError as exc:
+        return {"error": f"HTTP error: {exc}"}
+
+
+# ---------------------------------------------------------------------------
+# Tool definitions
+# ---------------------------------------------------------------------------
+
+TOOLS: list[dict[str, Any]] = [
+    # ---- Web Intelligence ----
+    {
+        "name": "nrv_search_web",
+        "description": (
+            "Search the web using nrv's search providers. Returns organic results "
+            "with titles, URLs, and snippets. Supports Google search operators."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Search query. Supports Google operators (site:, filetype:, etc.).",
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Number of results to return (1-100). Default: 10.",
+                    "default": 10,
+                },
+                "mode": {
+                    "type": "string",
+                    "description": "Search mode. 'web' for general web search.",
+                    "default": "web",
+                    "enum": ["web"],
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "nrv_scrape_page",
+        "description": (
+            "Extract clean content from one or more web pages. Returns markdown text. "
+            "Handles JavaScript-rendered pages and PDFs automatically."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "Single URL to scrape.",
+                },
+                "urls": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "Multiple URLs to scrape in parallel (alternative to 'url').",
+                },
+                "objective": {
+                    "type": "string",
+                    "description": "Focus extraction on this intent (e.g. 'pricing information').",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "nrv_google_search",
+        "description": (
+            "Google search via RapidAPI for GTM intelligence. Supports all Google "
+            "operators (site:, inurl:, intitle:, filetype:, -exclude, \"exact phrase\", OR). "
+            "IMPORTANT: Before constructing queries for specific platforms (LinkedIn, Twitter, "
+            "Reddit, Instagram, etc.), call nrv_search_patterns first to get the correct "
+            "query patterns and site: prefixes for that platform."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": (
+                        "Google search query. Supports operators: "
+                        "site:domain.com, inurl:keyword, intitle:keyword, "
+                        "filetype:pdf, -exclude, \"exact phrase\", term1 OR term2. "
+                        "Example: site:linkedin.com/in \"VP Sales\" \"fintech\""
+                    ),
+                },
+                "num_results": {
+                    "type": "integer",
+                    "description": "Number of results (1-300). Default: 10.",
+                    "default": 10,
+                },
+                "tbs": {
+                    "type": "string",
+                    "description": (
+                        "Time-based search filter. Friendly names: hour, day, week, month, year. "
+                        "Raw Google tbs values for fine control: qdr:h (1 hour), qdr:h2 (2 hours), "
+                        "qdr:h6 (6 hours), qdr:d (1 day), qdr:d3 (3 days), qdr:w (1 week), "
+                        "qdr:w2 (2 weeks), qdr:m (1 month), qdr:m3 (3 months), qdr:y (1 year). "
+                        "Custom date range: cdr:1,cd_min:MM/DD/YYYY,cd_max:MM/DD/YYYY"
+                    ),
+                },
+                "site": {
+                    "type": "string",
+                    "description": (
+                        "Convenience: restrict to domain (auto-adds site: operator). "
+                        "Example: 'linkedin.com/in' restricts to LinkedIn profiles."
+                    ),
+                },
+                "country": {
+                    "type": "string",
+                    "description": "Country code for localized results: us, in, gb, de, ca, au.",
+                },
+                "language": {
+                    "type": "string",
+                    "description": "Language code for results: en, hi, fr, de, es, ja.",
+                },
+                "queries": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Multiple queries to run concurrently (bulk search). "
+                        "Returns results grouped by query. Max ~10 concurrent."
+                    ),
+                },
+            },
+            "required": ["query"],
+        },
+    },
+    # ---- Enrichment ----
+    {
+        "name": "nrv_enrich_person",
+        "description": (
+            "Enrich a person by email, name+domain, or LinkedIn URL. Returns profile "
+            "data including title, company, location, seniority, and contact info."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "email": {
+                    "type": "string",
+                    "description": "Email address to enrich.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Full name (e.g. 'John Doe').",
+                },
+                "company": {
+                    "type": "string",
+                    "description": "Company name or domain (e.g. 'acme.com').",
+                },
+                "linkedin_url": {
+                    "type": "string",
+                    "description": "LinkedIn profile URL.",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Force a specific provider (e.g. 'apollo', 'pdl'). Omit for auto-selection.",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
+        "name": "nrv_enrich_company",
+        "description": (
+            "Enrich a company by domain or name. Returns company profile with industry, "
+            "employee count, funding, description, and more."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "domain": {
+                    "type": "string",
+                    "description": "Company domain (e.g. 'stripe.com'). URLs are auto-cleaned.",
+                },
+                "name": {
+                    "type": "string",
+                    "description": "Company name (if domain is unknown).",
+                },
+                "provider": {
+                    "type": "string",
+                    "description": "Force a specific provider. Omit for auto-selection.",
+                },
+            },
+            "required": [],
+        },
+    },
+    # ---- Data Management ----
+    {
+        "name": "nrv_query_table",
+        "description": (
+            "Query a data table stored in nrv. Returns rows matching the filters. "
+            "Use nrv_list_tables first to see available tables."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "table_name": {
+                    "type": "string",
+                    "description": "Name of the table to query.",
+                },
+                "filters": {
+                    "type": "object",
+                    "description": "Key-value filters to apply (e.g. {\"industry\": \"SaaS\"}).",
+                },
+                "limit": {
+                    "type": "integer",
+                    "description": "Maximum rows to return. Default: 50.",
+                    "default": 50,
+                },
+            },
+            "required": ["table_name"],
+        },
+    },
+    {
+        "name": "nrv_list_tables",
+        "description": "List all data tables with row counts and column counts.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    # ---- Account ----
+    {
+        "name": "nrv_credit_balance",
+        "description": (
+            "Check the current credit balance and monthly spend. "
+            "BYOK (bring-your-own-key) calls are free; platform key calls cost credits."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "nrv_provider_status",
+        "description": (
+            "Check available providers and their status. Shows which providers have "
+            "BYOK keys vs platform keys, and whether they are operational."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    # ---- Search Intelligence ----
+    {
+        "name": "nrv_search_patterns",
+        "description": (
+            "Get platform-specific Google search query patterns and GTM use case playbooks. "
+            "ALWAYS call this before constructing Google searches for specific platforms "
+            "(LinkedIn, Twitter, Reddit, Instagram, etc.) or GTM use cases (hiring signals, "
+            "funding news, competitor intel). Returns exact site: prefixes, query templates, "
+            "operator usage, tbs recommendations, and tips. This data lives on the server "
+            "and evolves without client updates."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "platform": {
+                    "type": "string",
+                    "description": (
+                        "Get patterns for a specific platform. Options: "
+                        "linkedin_profiles, linkedin_posts, linkedin_jobs, linkedin_companies, "
+                        "twitter_posts, twitter_profiles, reddit_discussions, "
+                        "instagram_businesses, youtube_content, github_repos, "
+                        "g2_reviews, crunchbase_companies, local_businesses, glassdoor_company"
+                    ),
+                },
+                "use_case": {
+                    "type": "string",
+                    "description": (
+                        "Get patterns for a GTM use case. Options: "
+                        "funding_news, hiring_signals, leadership_changes, "
+                        "competitor_intelligence, tech_stack_discovery, "
+                        "non_traditional_list_building, content_research, buying_intent"
+                    ),
+                },
+            },
+            "required": [],
+        },
+    },
+    # ---- Connected Apps (Composio) ----
+    {
+        "name": "nrv_list_actions",
+        "description": (
+            "List all available actions for a connected app. Returns action names and "
+            "descriptions. Use this to discover what actions are available before executing. "
+            "Workflow: nrv_list_connections → nrv_list_actions → nrv_get_action_schema → nrv_execute_action"
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "type": "string",
+                    "description": (
+                        "Catalog app key: gmail, slack, google_sheets, google_docs, "
+                        "hubspot, salesforce, linear, notion, clickup, asana, "
+                        "airtable, google_calendar, calendly, attio, google_drive"
+                    ),
+                },
+            },
+            "required": ["app_id"],
+        },
+    },
+    {
+        "name": "nrv_get_action_schema",
+        "description": (
+            "Get the parameter schema for a specific action. Returns parameter names, "
+            "types, descriptions, and which are required. Call this after nrv_list_actions "
+            "to know exactly what parameters to pass to nrv_execute_action."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "action_name": {
+                    "type": "string",
+                    "description": "Action name from nrv_list_actions (e.g. GMAIL_SEND_EMAIL).",
+                },
+            },
+            "required": ["action_name"],
+        },
+    },
+    {
+        "name": "nrv_execute_action",
+        "description": (
+            "Execute an action on a connected app. The tenant must have an active OAuth "
+            "connection. Use nrv_list_actions to find available actions and "
+            "nrv_get_action_schema to get the required parameters before calling this."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "type": "string",
+                    "description": "Catalog app key (e.g. 'gmail', 'google_sheets').",
+                },
+                "action": {
+                    "type": "string",
+                    "description": "Action name from nrv_list_actions (e.g. GMAIL_SEND_EMAIL).",
+                },
+                "params": {
+                    "type": "object",
+                    "description": "Action parameters from nrv_get_action_schema.",
+                },
+            },
+            "required": ["app_id", "action", "params"],
+        },
+    },
+    {
+        "name": "nrv_list_connections",
+        "description": (
+            "List all active OAuth connections for the current tenant. "
+            "Shows which apps (Gmail, Slack, Sheets, etc.) are connected and ready to use. "
+            "ALWAYS call this before nrv_execute_action to verify the app is connected."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+    {
+        "name": "nrv_health",
+        "description": (
+            "Quick health check — verifies the nrv server is reachable, the user is "
+            "authenticated, and returns tenant info. Use this to diagnose connection issues."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
+]
+
+
+# ---------------------------------------------------------------------------
+# Tool handlers
+# ---------------------------------------------------------------------------
+
+
+def _handle_nrv_search_web(args: dict[str, Any]) -> dict[str, Any]:
+    query = args.get("query", "")
+    if not query:
+        return {"error": "Parameter 'query' is required."}
+
+    params: dict[str, Any] = {"q": query, "num": args.get("max_results", 10)}
+    result = _api_request("POST", "/execute", json_body={
+        "operation": "search_web",
+        "params": params,
+        "provider": "rapidapi_google",
+    })
+    return result
+
+
+def _handle_nrv_scrape_page(args: dict[str, Any]) -> dict[str, Any]:
+    url = args.get("url")
+    urls = args.get("urls")
+    if not url and not urls:
+        return {"error": "Either 'url' or 'urls' parameter is required."}
+
+    params: dict[str, Any] = {}
+    if url:
+        params["url"] = url
+    if urls:
+        params["urls"] = urls
+    if args.get("objective"):
+        params["objective"] = args["objective"]
+
+    result = _api_request("POST", "/execute", json_body={
+        "operation": "scrape_page",
+        "params": params,
+        "provider": "parallel_web",
+    })
+    return result
+
+
+def _handle_nrv_google_search(args: dict[str, Any]) -> dict[str, Any]:
+    query = args.get("query", "")
+    queries = args.get("queries")
+
+    if not query and not queries:
+        return {"error": "Parameter 'query' is required (or 'queries' for bulk search)."}
+
+    params: dict[str, Any] = {
+        "num": args.get("num_results", 10),
+    }
+
+    # Single query or bulk queries
+    if queries and isinstance(queries, list) and len(queries) > 1:
+        params["queries"] = queries
+        params["q"] = queries[0]  # server needs at least one q
+    else:
+        params["q"] = query
+
+    # Site restriction (convenience)
+    if args.get("site"):
+        params["site"] = args["site"]
+
+    # Country (gl param)
+    if args.get("country"):
+        params["gl"] = args["country"]
+
+    # Language (hl param)
+    if args.get("language"):
+        params["hl"] = args["language"]
+
+    # Time-based search — accept tbs directly or friendly names
+    # Supports: hour, day, week, month, year, qdr:h2, qdr:d3, cdr:1,...
+    tbs = args.get("tbs") or args.get("time_filter")
+    if tbs:
+        params["tbs"] = tbs
+
+    result = _api_request("POST", "/execute", json_body={
+        "operation": "search_web",
+        "params": params,
+        "provider": "rapidapi_google",
+    })
+    return result
+
+
+def _handle_nrv_enrich_person(args: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if args.get("email"):
+        params["email"] = args["email"].strip().lower()
+    if args.get("name"):
+        params["name"] = args["name"].strip()
+    if args.get("company"):
+        # Could be a domain or name
+        company = args["company"].strip()
+        if "." in company:
+            params["domain"] = company
+        else:
+            params["organization_name"] = company
+    if args.get("linkedin_url"):
+        params["linkedin_url"] = args["linkedin_url"].strip()
+
+    if not params:
+        return {"error": "At least one identifier is required (email, name, company, or linkedin_url)."}
+
+    body: dict[str, Any] = {
+        "operation": "enrich_person",
+        "params": params,
+    }
+    if args.get("provider"):
+        body["provider"] = args["provider"]
+
+    return _api_request("POST", "/execute", json_body=body)
+
+
+def _handle_nrv_enrich_company(args: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if args.get("domain"):
+        # Clean the domain
+        domain = args["domain"].strip().lower()
+        if domain.startswith(("http://", "https://")):
+            from urllib.parse import urlparse
+            parsed = urlparse(domain)
+            domain = parsed.hostname or domain
+        if domain.startswith("www."):
+            domain = domain[4:]
+        domain = domain.rstrip("/").rstrip(".")
+        params["domain"] = domain
+    if args.get("name"):
+        params["name"] = args["name"].strip()
+
+    if not params:
+        return {"error": "At least one of 'domain' or 'name' is required."}
+
+    body: dict[str, Any] = {
+        "operation": "enrich_company",
+        "params": params,
+    }
+    if args.get("provider"):
+        body["provider"] = args["provider"]
+
+    return _api_request("POST", "/execute", json_body=body)
+
+
+def _handle_nrv_query_table(args: dict[str, Any]) -> dict[str, Any]:
+    table_name = args.get("table_name", "")
+    if not table_name:
+        return {"error": "Parameter 'table_name' is required."}
+
+    params: dict[str, Any] = {}
+    filters = args.get("filters")
+    if filters and isinstance(filters, dict):
+        params.update(filters)
+    limit = args.get("limit", 50)
+    params["limit"] = limit
+
+    return _api_request("GET", f"/tables/{table_name}", params=params)
+
+
+def _handle_nrv_list_tables(args: dict[str, Any]) -> dict[str, Any]:
+    return _api_request("GET", "/tables")
+
+
+def _handle_nrv_credit_balance(args: dict[str, Any]) -> dict[str, Any]:
+    return _api_request("GET", "/credits")
+
+
+def _handle_nrv_provider_status(args: dict[str, Any]) -> dict[str, Any]:
+    result = _api_request("GET", "/keys")
+    if "error" in result:
+        return result
+
+    keys_data = result.get("keys", [])
+
+    # Build a status overview
+    providers_info = [
+        ("apollo", "Person & company enrichment, people search"),
+        ("rocketreach", "Person enrichment, school/alumni search"),
+        ("pdl", "People Data Labs enrichment"),
+        ("hunter", "Email finder and verifier"),
+        ("leadmagic", "Lead enrichment"),
+        ("zerobounce", "Email verification"),
+        ("rapidapi_google", "Google web search"),
+        ("parallel_web", "Web scraping and content extraction"),
+        ("predictleads", "Company jobs, news, similar companies"),
+    ]
+
+    providers = []
+    for prov_name, desc in providers_info:
+        has_byok = any(k.get("provider") == prov_name for k in keys_data)
+        providers.append({
+            "provider": prov_name,
+            "description": desc,
+            "key_source": "byok" if has_byok else "platform",
+            "status": "available",
+        })
+
+    return {"providers": providers, "byok_keys": len(keys_data)}
+
+
+def _handle_nrv_search_patterns(args: dict[str, Any]) -> dict[str, Any]:
+    params: dict[str, Any] = {}
+    if args.get("platform"):
+        params["platform"] = args["platform"]
+    if args.get("use_case"):
+        params["use_case"] = args["use_case"]
+    return _api_request("GET", "/search/patterns", params=params or None)
+
+
+def _handle_nrv_list_actions(args: dict[str, Any]) -> dict[str, Any]:
+    app_id = args.get("app_id", "")
+    if not app_id:
+        return {"error": "Parameter 'app_id' is required (e.g. 'gmail', 'google_sheets')."}
+    return _api_request("GET", "/connections/actions", params={"app_id": app_id})
+
+
+def _handle_nrv_get_action_schema(args: dict[str, Any]) -> dict[str, Any]:
+    action_name = args.get("action_name", "")
+    if not action_name:
+        return {"error": "Parameter 'action_name' is required (e.g. 'GMAIL_SEND_EMAIL')."}
+    return _api_request("GET", f"/connections/actions/{action_name}/schema")
+
+
+def _handle_nrv_execute_action(args: dict[str, Any]) -> dict[str, Any]:
+    app_id = args.get("app_id", "")
+    action = args.get("action", "")
+    params = args.get("params", {})
+
+    if not app_id:
+        return {"error": "Parameter 'app_id' is required (e.g. 'gmail', 'google_sheets')."}
+    if not action:
+        return {"error": "Parameter 'action' is required (e.g. 'GMAIL_SEND_EMAIL')."}
+
+    return _api_request("POST", "/connections/execute", json_body={
+        "app_id": app_id,
+        "action": action,
+        "params": params,
+    }, timeout=90)
+
+
+def _handle_nrv_list_connections(args: dict[str, Any]) -> dict[str, Any]:
+    result = _api_request("GET", "/connections")
+    if "error" in result:
+        return result
+
+    connections = result.get("connections", [])
+    # Only surface ACTIVE connections as usable
+    active = [c for c in connections if (c.get("status") or "").upper() == "ACTIVE"]
+    if not active:
+        return {
+            "connections": [],
+            "message": "No active connections. Ask the user to connect apps at the nrv dashboard.",
+        }
+    return {"connections": active}
+
+
+def _handle_nrv_health(args: dict[str, Any]) -> dict[str, Any]:
+    """Quick health check — server reachable + auth valid."""
+    creds = load_credentials()
+    if creds is None:
+        return {
+            "status": "error",
+            "error": "Not authenticated. Run `nrv auth login` in your terminal.",
+        }
+
+    # Try to hit the credits endpoint as a lightweight auth check
+    result = _api_request("GET", "/credits")
+    if "error" in result:
+        return {"status": "error", "error": result["error"]}
+
+    return {
+        "status": "ok",
+        "server": get_api_base_url(),
+        "balance": result.get("balance"),
+    }
+
+
+# Handler dispatch table
+TOOL_HANDLERS: dict[str, Any] = {
+    "nrv_search_web": _handle_nrv_search_web,
+    "nrv_scrape_page": _handle_nrv_scrape_page,
+    "nrv_google_search": _handle_nrv_google_search,
+    "nrv_enrich_person": _handle_nrv_enrich_person,
+    "nrv_enrich_company": _handle_nrv_enrich_company,
+    "nrv_query_table": _handle_nrv_query_table,
+    "nrv_list_tables": _handle_nrv_list_tables,
+    "nrv_credit_balance": _handle_nrv_credit_balance,
+    "nrv_provider_status": _handle_nrv_provider_status,
+    "nrv_search_patterns": _handle_nrv_search_patterns,
+    "nrv_list_actions": _handle_nrv_list_actions,
+    "nrv_get_action_schema": _handle_nrv_get_action_schema,
+    "nrv_execute_action": _handle_nrv_execute_action,
+    "nrv_list_connections": _handle_nrv_list_connections,
+    "nrv_health": _handle_nrv_health,
+}
+
+
+# ---------------------------------------------------------------------------
+# MCP JSON-RPC server
+# ---------------------------------------------------------------------------
+
+
+def _make_response(req_id: Any, result: dict) -> dict:
+    return {"jsonrpc": "2.0", "id": req_id, "result": result}
+
+
+def _make_error(req_id: Any, code: int, message: str) -> dict:
+    return {"jsonrpc": "2.0", "id": req_id, "error": {"code": code, "message": message}}
+
+
+def _make_tool_result(req_id: Any, text: str, is_error: bool = False) -> dict:
+    return {
+        "jsonrpc": "2.0",
+        "id": req_id,
+        "result": {
+            "content": [{"type": "text", "text": text}],
+            **({"isError": True} if is_error else {}),
+        },
+    }
+
+
+def handle_jsonrpc_request(request: dict) -> dict | None:
+    """Handle a single JSON-RPC request and return the response (or None for notifications)."""
+    method = request.get("method", "")
+    req_id = request.get("id")
+    params = request.get("params", {})
+
+    logger.info("Received method=%s id=%s", method, req_id)
+
+    # --- initialize ---
+    if method == "initialize":
+        return _make_response(req_id, {
+            "protocolVersion": PROTOCOL_VERSION,
+            "capabilities": {"tools": {}},
+            "serverInfo": {"name": SERVER_NAME, "version": SERVER_VERSION},
+        })
+
+    # --- notifications/initialized ---
+    if method == "notifications/initialized":
+        return None  # notification, no response
+
+    # --- tools/list ---
+    if method == "tools/list":
+        return _make_response(req_id, {"tools": TOOLS})
+
+    # --- tools/call ---
+    if method == "tools/call":
+        tool_name = params.get("name", "")
+        tool_args = params.get("arguments", {})
+
+        handler = TOOL_HANDLERS.get(tool_name)
+        if handler is None:
+            return _make_error(req_id, -32601, f"Unknown tool: {tool_name}")
+
+        # Check auth before executing
+        creds = load_credentials()
+        if creds is None:
+            return _make_tool_result(
+                req_id,
+                json.dumps({
+                    "error": "Not authenticated. Run `nrv auth login` in your terminal first."
+                }, indent=2),
+                is_error=True,
+            )
+
+        try:
+            global _current_tool_name
+            _current_tool_name = tool_name
+            result = handler(tool_args)
+            _current_tool_name = ""
+            text = json.dumps(result, indent=2, default=str)
+
+            # Check if the result itself contains an error
+            is_err = isinstance(result, dict) and "error" in result
+            return _make_tool_result(req_id, text, is_error=is_err)
+
+        except Exception as exc:
+            logger.exception("Tool %s failed", tool_name)
+            return _make_tool_result(
+                req_id,
+                json.dumps({"error": str(exc)}, indent=2),
+                is_error=True,
+            )
+
+    # --- ping ---
+    if method == "ping":
+        return _make_response(req_id, {})
+
+    # --- unknown method ---
+    if req_id is not None:
+        return _make_error(req_id, -32601, f"Unknown method: {method}")
+
+    # Unknown notification — ignore
+    return None
+
+
+def run_stdio() -> None:
+    """Run the MCP server reading JSON-RPC messages from stdin, writing to stdout."""
+    logger.info("nrv MCP server starting on stdio")
+
+    for line in sys.stdin:
+        line = line.strip()
+        if not line:
+            continue
+
+        try:
+            request = json.loads(line)
+        except json.JSONDecodeError:
+            error_resp = {
+                "jsonrpc": "2.0",
+                "id": None,
+                "error": {"code": -32700, "message": "Parse error"},
+            }
+            sys.stdout.write(json.dumps(error_resp) + "\n")
+            sys.stdout.flush()
+            continue
+
+        response = handle_jsonrpc_request(request)
+        if response is not None:
+            sys.stdout.write(json.dumps(response) + "\n")
+            sys.stdout.flush()
+
+    logger.info("nrv MCP server shutting down (stdin closed)")
+
+
+# ---------------------------------------------------------------------------
+# Try to use official MCP SDK if available, otherwise use raw JSON-RPC
+# ---------------------------------------------------------------------------
+
+
+def _try_mcp_sdk() -> bool:
+    """Attempt to run using the official mcp Python SDK. Returns True if successful."""
+    try:
+        from mcp.server import Server
+        from mcp.server.stdio import stdio_server
+        import mcp.types as types
+        import asyncio
+    except ImportError:
+        return False
+
+    logger.info("Using official mcp SDK")
+
+    server = Server(SERVER_NAME)
+
+    @server.list_tools()
+    async def list_tools() -> list[types.Tool]:
+        return [
+            types.Tool(
+                name=t["name"],
+                description=t["description"],
+                inputSchema=t["inputSchema"],
+            )
+            for t in TOOLS
+        ]
+
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
+        handler = TOOL_HANDLERS.get(name)
+        if handler is None:
+            return [types.TextContent(type="text", text=json.dumps({"error": f"Unknown tool: {name}"}))]
+
+        creds = load_credentials()
+        if creds is None:
+            return [types.TextContent(
+                type="text",
+                text=json.dumps({"error": "Not authenticated. Run `nrv auth login` first."}),
+            )]
+
+        try:
+            global _current_tool_name
+            _current_tool_name = name
+            result = handler(arguments)
+            _current_tool_name = ""
+            return [types.TextContent(type="text", text=json.dumps(result, indent=2, default=str))]
+        except Exception as exc:
+            _current_tool_name = ""
+            logger.exception("Tool %s failed", name)
+            return [types.TextContent(type="text", text=json.dumps({"error": str(exc)}))]
+
+    async def _run() -> None:
+        async with stdio_server() as (read_stream, write_stream):
+            await server.run(read_stream, write_stream, server.create_initialization_options())
+
+    asyncio.run(_run())
+    return True
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+
+def main() -> None:
+    """Main entry point for the nrv MCP server."""
+    # Try official SDK first, fall back to raw JSON-RPC
+    if not _try_mcp_sdk():
+        logger.info("mcp SDK not available, using raw JSON-RPC over stdio")
+        run_stdio()
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,60 @@
+version: "3.9"
+
+services:
+  # ── PostgreSQL (simulates Aurora Serverless v2 locally) ──
+  postgres:
+    image: postgres:15-alpine
+    container_name: nrv-postgres
+    environment:
+      POSTGRES_DB: nrv
+      POSTGRES_USER: nrv
+      POSTGRES_PASSWORD: nrv_local_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - nrv_pgdata:/var/lib/postgresql/data
+      - ./migrations/001_initial.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nrv -d nrv"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── Redis (simulates ElastiCache locally) ──
+  redis:
+    image: redis:7-alpine
+    container_name: nrv-redis
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # ── nrv API Server ──
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile.server
+    container_name: nrv-api
+    environment:
+      DATABASE_URL: postgresql+asyncpg://nrv:nrv_local_dev@postgres:5432/nrv
+      REDIS_URL: redis://redis:6379/0
+      JWT_SECRET_KEY: dev-secret-key-change-in-production
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
+      ENVIRONMENT: development
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./server:/app/server
+    command: uvicorn server.app:app --host 0.0.0.0 --port 8000 --reload
+
+volumes:
+  nrv_pgdata:

@@ -1,0 +1,17 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "nrv-server",
+      "runtimeExecutable": "uvicorn",
+      "runtimeArgs": ["server.app:app", "--reload", "--port", "8000"],
+      "port": 8000
+    },
+    {
+      "name": "dashboard",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["dashboard/app.py"],
+      "port": 5555
+    }
+  ]
+}

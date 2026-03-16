@@ -1,0 +1,983 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>nrv &mdash; {{ tenant_name }}</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #0a0a0f; color: #e0e0e6; min-height: 100vh; }
+
+        .topbar { background: #12121a; border-bottom: 1px solid #1e1e2e; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; }
+        .topbar h1 { font-size: 18px; font-weight: 600; }
+        .topbar h1 span { color: #34d399; }
+        .topbar .meta { display: flex; gap: 12px; align-items: center; }
+        .topbar a { color: #818cf8; text-decoration: none; font-size: 13px; }
+
+        .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px 120px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 0; margin-bottom: 28px; border-bottom: 1px solid #1e1e2e; }
+        .tab { padding: 12px 24px; font-size: 14px; font-weight: 500; color: #6b7280; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s; text-decoration: none; }
+        .tab:hover { color: #e0e0e6; text-decoration: none; }
+        .tab.active { color: #818cf8; border-bottom-color: #818cf8; }
+        .tab-badge { background: #1e1e2e; color: #818cf8; font-size: 10px; padding: 1px 6px; border-radius: 10px; margin-left: 6px; }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+
+        .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 32px; }
+        .stat-card { background: #12121a; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; }
+        .stat-card .label { font-size: 12px; color: #6b7280; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .stat-card .value { font-size: 28px; font-weight: 700; color: #f0f0f5; }
+        .stat-card .sub { font-size: 12px; color: #6b7280; margin-top: 4px; }
+
+        .section { margin-bottom: 32px; }
+        .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 16px; }
+        .section-header h2 { font-size: 16px; font-weight: 600; }
+
+        table { width: 100%; border-collapse: collapse; background: #12121a; border: 1px solid #1e1e2e; border-radius: 12px; overflow: hidden; }
+        th { text-align: left; padding: 12px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: #6b7280; background: #0f0f17; border-bottom: 1px solid #1e1e2e; }
+        td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid #1a1a26; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #15151f; }
+
+        .tag { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: 11px; font-weight: 500; }
+        .tag-platform { background: #1e1b4b; color: #818cf8; }
+        .tag-byok { background: #064e3b; color: #34d399; }
+        .tag-active { background: #064e3b; color: #34d399; }
+        .tag-none { background: #1e1e2e; color: #6b7280; }
+        .tag-available { background: #1e1b4b; color: #818cf8; }
+        .tag-unavailable { background: #1e1e2e; color: #6b7280; }
+        .tag-pending { background: #78350f; color: #fbbf24; }
+        .tag-connected { background: #064e3b; color: #34d399; }
+        .tag-not_connected { background: #1e1e2e; color: #6b7280; }
+        .tag-pending_oauth { background: #78350f; color: #fbbf24; }
+        .tag-disconnected { background: #7f1d1d; color: #fca5a5; }
+        .tag-partial { background: #78350f; color: #fbbf24; }
+        .tag-success { background: #064e3b; color: #34d399; }
+        .tag-failed { background: #7f1d1d; color: #fca5a5; }
+
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+        .pulse { animation: pulse-dot 1.5s ease-in-out infinite; }
+
+        .fingerprint { font-family: 'SF Mono', 'Fira Code', monospace; font-size: 11px; color: #6b7280; background: #1a1a26; padding: 2px 8px; border-radius: 4px; }
+
+        .btn { padding: 8px 16px; border-radius: 8px; border: none; font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s; }
+        .btn-primary { background: #818cf8; color: #fff; }
+        .btn-primary:hover { background: #6366f1; }
+        .btn-green { background: #059669; color: #fff; }
+        .btn-green:hover { background: #047857; }
+        .btn-danger { background: rgba(127,29,29,0.6); color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+        .btn-danger:hover { background: #991b1b; }
+        .btn-ghost { background: transparent; border: 1px solid #2e2e3e; color: #e0e0e6; }
+        .btn-ghost:hover { background: #1e1e2e; }
+        .btn-sm { padding: 5px 14px; font-size: 12px; }
+
+        .form-row { display: flex; gap: 8px; align-items: center; }
+        .form-row input, .form-row select { background: #1a1a26; border: 1px solid #2e2e3e; color: #e0e0e6; padding: 8px 12px; border-radius: 8px; font-size: 13px; }
+        .form-row input::placeholder { color: #4b5563; }
+        .form-row input[type="password"] { font-family: 'SF Mono', monospace; }
+
+        .card { background: #12121a; border: 1px solid #1e1e2e; border-radius: 12px; padding: 20px; margin-bottom: 16px; }
+        .provider-actions { display: flex; gap: 6px; align-items: center; }
+        .key-input-row { display: none; }
+        .key-input-row.show { display: table-row; }
+        .key-input-row td { background: #0f0f17; border-bottom: 1px solid #1e1e2e; }
+
+        a { color: #818cf8; text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* ========================================= */
+        /* CONNECTIONS CARDS                         */
+        /* ========================================= */
+        .conn-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+
+        .conn-card {
+            background: #12121a; border: 1px solid #1e1e2e; border-radius: 14px;
+            padding: 20px; transition: all 0.2s ease; position: relative; overflow: hidden;
+        }
+        .conn-card::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: transparent; transition: background 0.2s;
+        }
+        .conn-card:hover { border-color: #2e2e3e; transform: translateY(-1px); box-shadow: 0 4px 20px rgba(0,0,0,0.3); }
+        .conn-card.connected { border-color: rgba(52,211,153,0.3); }
+        .conn-card.connected::before { background: linear-gradient(90deg, #34d399, #059669); }
+        .conn-card.pending { border-color: rgba(251,191,36,0.3); }
+        .conn-card.pending::before { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+
+        .conn-card .conn-header { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+        .conn-card .conn-logo {
+            width: 36px; height: 36px; border-radius: 10px; display: flex;
+            align-items: center; justify-content: center; flex-shrink: 0;
+            background: #1a1a26; overflow: hidden;
+        }
+        .conn-card .conn-logo img { width: 22px; height: 22px; object-fit: contain; }
+        .conn-card .conn-name { font-weight: 600; font-size: 14px; color: #f0f0f5; }
+        .conn-card .conn-category { font-size: 11px; color: #6b7280; margin-top: 1px; }
+
+        .conn-card .conn-desc { font-size: 12px; color: #6b7280; margin-bottom: 14px; line-height: 1.5; }
+        .conn-card .conn-footer { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+        .conn-card .conn-stats { font-size: 11px; color: #6b7280; display: flex; align-items: center; gap: 6px; }
+        .conn-card .conn-stats .dot { width: 6px; height: 6px; border-radius: 50%; background: #34d399; display: inline-block; }
+
+        /* Category filter */
+        .filter-row { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .filter-btn { padding: 6px 16px; border-radius: 20px; font-size: 12px; background: #1e1e2e; color: #9ca3af; border: 1px solid transparent; cursor: pointer; transition: all 0.15s; font-weight: 500; }
+        .filter-btn:hover { color: #e0e0e6; background: #252536; }
+        .filter-btn.active { background: #818cf8; color: white; }
+
+        /* Usage bars */
+        .usage-bar-container { display: flex; align-items: center; gap: 8px; }
+        .usage-bar { height: 6px; border-radius: 3px; background: #1e1e2e; flex: 1; overflow: hidden; }
+        .usage-bar-fill { height: 100%; border-radius: 3px; }
+        .usage-bar-fill.platform { background: #818cf8; }
+        .usage-bar-fill.byok { background: #34d399; }
+
+        /* Ledger table */
+        .ledger-amount-credit { color: #34d399; }
+        .ledger-amount-debit { color: #fca5a5; }
+
+        /* Toast notification */
+        .toast { position: fixed; top: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; font-size: 13px; z-index: 1000; display: none; }
+        .toast.success { background: #064e3b; color: #34d399; border: 1px solid rgba(52,211,153,0.3); }
+        .toast.error { background: #7f1d1d; color: #fca5a5; border: 1px solid rgba(239,68,68,0.2); }
+        .toast.show { display: block; animation: fadeInOut 3s ease forwards; }
+        @keyframes fadeInOut { 0% { opacity: 0; transform: translateY(-10px); } 10% { opacity: 1; transform: translateY(0); } 80% { opacity: 1; } 100% { opacity: 0; } }
+    </style>
+</head>
+<body>
+    <div id="toast" class="toast"></div>
+
+    <div class="topbar">
+        <h1><span>{{ tenant_name }}</span> &mdash; nrv</h1>
+        <div class="meta">
+            <span class="tag tag-{{ status }}">{{ status }}</span>
+            <span class="tag tag-platform">{{ plan }}</span>
+            <a href="/api/v1/auth/logout" style="color:#888;font-size:13px;text-decoration:none;margin-left:16px;">Sign out</a>
+        </div>
+    </div>
+
+    <div class="container">
+        <!-- Tab Navigation -->
+        <div class="tabs">
+            <a href="/console/{{ tenant_id }}?tab=keys" class="tab {% if active_tab == 'keys' %}active{% endif %}">
+                API Keys
+                <span class="tab-badge">{{ (summary.using_my_keys|default(0)) + (summary.using_platform|default(0)) }}</span>
+            </a>
+            <a href="/console/{{ tenant_id }}?tab=connections" class="tab {% if active_tab == 'connections' %}active{% endif %}">
+                Connections
+                <span class="tab-badge">{{ conn_summary.active|default(0) }}</span>
+            </a>
+            <a href="/console/{{ tenant_id }}?tab=usage" class="tab {% if active_tab == 'usage' %}active{% endif %}">
+                Usage &amp; Billing
+            </a>
+            <a href="/console/{{ tenant_id }}?tab=runs" class="tab {% if active_tab == 'runs' %}active{% endif %}">
+                Runs
+                <span class="tab-badge">{{ runs_summary.total_workflows|default(0) }}</span>
+            </a>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- TAB: API Keys                                -->
+        <!-- ============================================ -->
+        <div class="tab-content {% if active_tab == 'keys' %}active{% endif %}" id="tab-keys">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="label">My Keys (BYOK)</div>
+                    <div class="value">{{ summary.using_my_keys|default(0) }}</div>
+                    <div class="sub">providers overridden</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Platform Keys</div>
+                    <div class="value">{{ summary.using_platform|default(0) }}</div>
+                    <div class="sub">using defaults</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Unavailable</div>
+                    <div class="value">{{ summary.unavailable|default(0) }}</div>
+                    <div class="sub">no key configured</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Credit Balance</div>
+                    <div class="value">${{ "%.2f"|format(usage.balance|default(0)) }}</div>
+                    <div class="sub">available credits</div>
+                </div>
+            </div>
+
+            <div class="section">
+                <div class="section-header">
+                    <h2>My Providers</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Key Source</th>
+                            <th>Status</th>
+                            <th>Fingerprint</th>
+                            <th>Calls</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for p in providers %}
+                        <tr>
+                            <td><strong>{{ p.provider }}</strong></td>
+                            <td>
+                                {% if p.using == 'byok' %}
+                                <span class="tag tag-byok">My Key</span>
+                                {% elif p.using == 'platform' %}
+                                <span class="tag tag-platform">Platform</span>
+                                {% else %}
+                                <span class="tag tag-none">None</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if p.status == 'active' or p.status == 'available' %}
+                                <span class="tag tag-active">{{ p.status }}</span>
+                                {% else %}
+                                <span class="tag tag-unavailable">{{ p.status }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if p.fingerprint and p.fingerprint != '-' %}
+                                <span class="fingerprint">{{ p.fingerprint }}</span>
+                                {% else %}
+                                <span style="color:#6b7280">&mdash;</span>
+                                {% endif %}
+                            </td>
+                            <td>{{ p.calls }}</td>
+                            <td>
+                                <div class="provider-actions">
+                                    {% if p.using == 'byok' %}
+                                    <button class="btn btn-ghost btn-sm" onclick="removeKey('{{ p.provider }}')">Use Default</button>
+                                    {% endif %}
+                                    <button class="btn btn-green btn-sm" onclick="toggleKeyInput('{{ p.provider }}')">
+                                        {% if p.using == 'byok' %}Rotate{% else %}Use My Key{% endif %}
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                        <tr class="key-input-row" id="key-input-{{ p.provider }}">
+                            <td colspan="6">
+                                <div class="form-row">
+                                    <span style="color:#6b7280;font-size:12px">{{ p.provider }} API key:</span>
+                                    <input type="password" id="key-value-{{ p.provider }}" placeholder="Paste your API key (encrypted immediately)" style="flex:1">
+                                    <button class="btn btn-green btn-sm" onclick="saveKey('{{ p.provider }}')">Encrypt &amp; Save</button>
+                                    <button type="button" class="btn btn-ghost btn-sm" onclick="toggleKeyInput('{{ p.provider }}')">Cancel</button>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- TAB: Connections                             -->
+        <!-- ============================================ -->
+        <div class="tab-content {% if active_tab == 'connections' %}active{% endif %}" id="tab-connections">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="label">Connected</div>
+                    <div class="value">{{ conn_summary.active|default(0) }}</div>
+                    <div class="sub">active integrations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Pending</div>
+                    <div class="value">{{ conn_summary.pending|default(0) }}</div>
+                    <div class="sub">awaiting auth</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Available</div>
+                    <div class="value">{{ conn_summary.available|default(0) }}</div>
+                    <div class="sub">ready to connect</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Tool Calls</div>
+                    <div class="value">{{ conn_usage.total_calls|default(0) }}</div>
+                    <div class="sub">across all tools</div>
+                </div>
+            </div>
+
+            <!-- Category Filters -->
+            <div class="filter-row">
+                <button class="filter-btn active" onclick="filterConnections('all')">All</button>
+                <button class="filter-btn" onclick="filterConnections('communication')">Communication</button>
+                <button class="filter-btn" onclick="filterConnections('data')">Data &amp; Sheets</button>
+                <button class="filter-btn" onclick="filterConnections('crm')">CRM</button>
+                <button class="filter-btn" onclick="filterConnections('project')">Project Mgmt</button>
+                <button class="filter-btn" onclick="filterConnections('calendar')">Calendar</button>
+            </div>
+
+            <div class="conn-grid">
+                {% for conn in connections %}
+                <div class="conn-card {% if conn.status == 'active' %}connected{% elif conn.status in ['pending', 'pending_oauth'] %}pending{% endif %}" data-category="{{ conn.category }}">
+                    <div class="conn-header">
+                        <div class="conn-logo">
+                            <img src="{{ {
+                                'slack': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/slack.svg',
+                                'gmail': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/gmail.svg',
+                                'microsoft_teams': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/microsoftteams.svg',
+                                'google_sheets': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlesheets.svg',
+                                'google_docs': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googledocs.svg',
+                                'google_drive': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googledrive.svg',
+                                'google_calendar': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/googlecalendar.svg',
+                                'airtable': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/airtable.svg',
+                                'hubspot': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/hubspot.svg',
+                                'salesforce': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/salesforce.svg',
+                                'pipedrive': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/pipedrive.svg',
+                                'instantly': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/lightning.svg',
+                                'lemlist': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/lemlist.svg',
+                                'linear': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/linear.svg',
+                                'notion': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/notion.svg',
+                                'clickup': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/clickup.svg',
+                                'asana': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/asana.svg',
+                                'zapier': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/zapier.svg',
+                                'calendly': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/calendly.svg',
+                                'apollo_io': 'https://cdn.jsdelivr.net/npm/simple-icons@v9/icons/apollo.svg'
+                            }.get(conn.app_id, '') }}" alt="{{ conn.name }}"
+                            style="filter: brightness(0) invert(1);"
+                            onerror="this.style.display='none';this.parentElement.innerHTML='<span style=font-size:20px>{{ conn.icon }}</span>'">
+                        </div>
+                        <div>
+                            <div class="conn-name">{{ conn.name }}</div>
+                            <div class="conn-category">{{ conn.category | capitalize }}</div>
+                        </div>
+                    </div>
+                    <div class="conn-desc">{{ conn.description }}</div>
+                    <div class="conn-footer">
+                        {% if conn.status == 'active' %}
+                            <div class="conn-stats">
+                                <span class="dot"></span>
+                                Connected &middot; {{ conn.total_calls }} calls
+                            </div>
+                            <button class="btn btn-danger btn-sm" onclick="disconnectApp('{{ conn.app_id }}', '{{ conn.name }}')">Disconnect</button>
+                        {% elif conn.status == 'pending_oauth' %}
+                            <span class="tag tag-pending pulse">Authorizing...</span>
+                            <button class="btn btn-primary btn-sm" onclick="connectApp('{{ conn.app_id }}')">Retry</button>
+                        {% elif conn.status == 'pending' %}
+                            <span class="tag tag-pending">Pending</span>
+                            <button class="btn btn-primary btn-sm" onclick="connectApp('{{ conn.app_id }}')">Authorize</button>
+                        {% elif conn.status == 'disconnected' %}
+                            <span class="tag tag-disconnected">Expired</span>
+                            <button class="btn btn-primary btn-sm" onclick="connectApp('{{ conn.app_id }}')">Reconnect</button>
+                        {% else %}
+                            <div class="conn-stats" style="opacity:0.4">Not connected</div>
+                            <button class="btn btn-primary btn-sm" onclick="connectApp('{{ conn.app_id }}')">Connect</button>
+                        {% endif %}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+
+            <!-- MCP Info -->
+            <div class="section" style="margin-top:28px;">
+                <div class="card" style="border-color:#1e1b4b;">
+                    <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;">
+                        <div style="width:36px;height:36px;border-radius:10px;background:#1e1b4b;display:flex;align-items:center;justify-content:center;font-size:18px;">&#x1F50C;</div>
+                        <div>
+                            <strong>MCP Integration</strong>
+                            <div style="font-size:12px;color:#6b7280;">Connect all your tools to Claude via MCP</div>
+                        </div>
+                    </div>
+                    <p style="font-size:13px;color:#6b7280;margin-bottom:12px;line-height:1.5;">
+                        Connected tools are available as MCP tools in Claude Code. Once connected,
+                        Claude can read your Slack channels, update Google Sheets, manage HubSpot contacts, and more.
+                    </p>
+                    <div style="background:#0f0f17;padding:12px 14px;border-radius:8px;font-family:'SF Mono','Fira Code',monospace;font-size:12px;color:#818cf8;margin-bottom:8px;">
+                        Entity ID: nrv-{{ tenant_id }}
+                    </div>
+                    <div style="font-size:11px;color:#4b5563;">
+                        To use connected tools in Claude Code, run:
+                        <code style="color:#818cf8;background:#0f0f17;padding:2px 6px;border-radius:4px;font-size:11px;">
+                            claude mcp add --transport sse composio-tools 'https://backend.composio.dev/v3/mcp/YOUR_KEY/mcp?user_id=nrv-{{ tenant_id }}'
+                        </code>
+                        <br><span style="color:#fbbf24;">Replace YOUR_KEY with your Composio API key. Never share the full URL.</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- TAB: Usage & Billing                         -->
+        <!-- ============================================ -->
+        <div class="tab-content {% if active_tab == 'usage' %}active{% endif %}" id="tab-usage">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="label">Credit Balance</div>
+                    <div class="value">${{ "%.2f"|format(usage.balance|default(0)) }}</div>
+                    <div class="sub">available credits</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Spent This Month</div>
+                    <div class="value">${{ "%.2f"|format(usage.spend_this_month|default(0)) }}</div>
+                    <div class="sub">current billing period</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Total API Calls</div>
+                    <div class="value">{{ usage.total_calls|default(0) }}</div>
+                    <div class="sub">enrichment requests</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Spend Cap</div>
+                    <div class="value">
+                        {% if usage.spend_cap %}
+                        ${{ "%.2f"|format(usage.spend_cap / 100) }}
+                        {% else %}
+                        &infin;
+                        {% endif %}
+                    </div>
+                    <div class="sub">monthly limit</div>
+                </div>
+            </div>
+
+            <!-- Enrichment Usage by Provider -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>Enrichment API Usage</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Provider</th>
+                            <th>Source</th>
+                            <th>Platform Calls</th>
+                            <th>BYOK Calls</th>
+                            <th>Total</th>
+                            <th>Distribution</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% if vault_usage %}
+                            {% for prov, data in vault_usage.items() %}
+                            {% set ptotal = data.get('platform_calls', 0) %}
+                            {% set btotal = data.get('byok_calls', 0) %}
+                            {% set total = data.get('total', ptotal + btotal) %}
+                            <tr>
+                                <td><strong>{{ prov }}</strong></td>
+                                <td>
+                                    {% if btotal > 0 and ptotal > 0 %}
+                                    <span class="tag tag-byok">Mixed</span>
+                                    {% elif btotal > 0 %}
+                                    <span class="tag tag-byok">BYOK</span>
+                                    {% elif ptotal > 0 %}
+                                    <span class="tag tag-platform">Platform</span>
+                                    {% else %}
+                                    <span class="tag tag-none">No usage</span>
+                                    {% endif %}
+                                </td>
+                                <td>{{ ptotal }}</td>
+                                <td>{{ btotal }}</td>
+                                <td><strong>{{ total }}</strong></td>
+                                <td>
+                                    {% if total > 0 %}
+                                    <div class="usage-bar-container">
+                                        <div class="usage-bar">
+                                            {% if ptotal > 0 %}
+                                            <div class="usage-bar-fill platform" style="width:{{ (ptotal / total * 100)|int }}%"></div>
+                                            {% endif %}
+                                        </div>
+                                        <span style="font-size:11px;color:#6b7280;">
+                                            {% if ptotal > 0 %}{{ (ptotal / total * 100)|int }}% platform{% endif %}
+                                            {% if btotal > 0 %}{{ (btotal / total * 100)|int }}% byok{% endif %}
+                                        </span>
+                                    </div>
+                                    {% else %}
+                                    <span style="color:#6b7280">&mdash;</span>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        {% else %}
+                        <tr><td colspan="6" style="text-align:center;color:#6b7280;padding:40px">No usage data yet. Make enrichment calls to see usage breakdown here.</td></tr>
+                        {% endif %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Tool Connection Usage -->
+            {% if conn_usage and conn_usage.breakdown %}
+            <div class="section">
+                <div class="section-header">
+                    <h2>Tool Connection Usage</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Tool</th>
+                            <th>Category</th>
+                            <th>Total Calls</th>
+                            <th>Errors</th>
+                            <th>Success Rate</th>
+                            <th>Last Used</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for app_id, data in conn_usage.breakdown.items() %}
+                        <tr>
+                            <td>
+                                <span style="margin-right:6px;">{{ data.icon }}</span>
+                                <strong>{{ data.name }}</strong>
+                            </td>
+                            <td><span class="tag" style="background:#1e1e2e;color:#9ca3af;font-size:10px;padding:1px 8px;">{{ data.category }}</span></td>
+                            <td>{{ data.total_calls }}</td>
+                            <td>{% if data.errors > 0 %}<span style="color:#fca5a5">{{ data.errors }}</span>{% else %}0{% endif %}</td>
+                            <td>{{ data.success_rate }}</td>
+                            <td style="font-size:11px;color:#6b7280">{{ data.last_call or 'Never' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            <!-- Credit Ledger -->
+            {% if ledger_entries %}
+            <div class="section">
+                <div class="section-header">
+                    <h2>Recent Transactions</h2>
+                </div>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Date</th>
+                            <th>Type</th>
+                            <th>Amount</th>
+                            <th>Balance After</th>
+                            <th>Operation</th>
+                            <th>Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for entry in ledger_entries %}
+                        <tr>
+                            <td style="font-size:11px;color:#6b7280">{{ entry.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                {% if entry.entry_type == 'credit' %}
+                                <span class="tag tag-byok">credit</span>
+                                {% elif entry.entry_type == 'debit' %}
+                                <span class="tag tag-disconnected" style="background:#7f1d1d;color:#fca5a5;">debit</span>
+                                {% else %}
+                                <span class="tag tag-pending">{{ entry.entry_type }}</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if entry.entry_type == 'credit' %}
+                                <span class="ledger-amount-credit">+${{ "%.2f"|format(entry.amount|float) }}</span>
+                                {% else %}
+                                <span class="ledger-amount-debit">-${{ "%.2f"|format(entry.amount|float|abs) }}</span>
+                                {% endif %}
+                            </td>
+                            <td>${{ "%.2f"|format(entry.balance_after|float) }}</td>
+                            <td style="font-size:12px;color:#9ca3af">{{ entry.operation or '&mdash;' }}</td>
+                            <td style="font-size:12px;color:#6b7280">{{ entry.description or '&mdash;' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+
+            <!-- Cost Breakdown Card -->
+            <div class="section">
+                <div class="card" style="border-color: #1e1b4b;">
+                    <h3 style="margin-bottom:12px;font-size:14px;">Understanding Your Costs</h3>
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+                        <div style="padding:12px;background:#0f0f17;border-radius:8px;">
+                            <div style="font-size:12px;color:#818cf8;margin-bottom:4px;">Platform Credits</div>
+                            <div style="font-size:13px;color:#9ca3af;">
+                                When you use our platform keys, each API call costs credits from your plan.
+                                We handle rate limiting, key rotation, and provider billing.
+                            </div>
+                        </div>
+                        <div style="padding:12px;background:#0f0f17;border-radius:8px;">
+                            <div style="font-size:12px;color:#34d399;margin-bottom:4px;">BYOK (Your Keys)</div>
+                            <div style="font-size:13px;color:#9ca3af;">
+                                When you use your own keys, the provider bills you directly.
+                                No platform markup. We just route the call securely.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ============================================ -->
+        <!-- TAB: Runs                                    -->
+        <!-- ============================================ -->
+        <div class="tab-content {% if active_tab == 'runs' %}active{% endif %}" id="tab-runs">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="label">Total Workflows</div>
+                    <div class="value">{{ runs_summary.total_workflows|default(0) }}</div>
+                    <div class="sub">Claude Code sessions</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Total Steps</div>
+                    <div class="value">{{ runs_summary.total_steps|default(0) }}</div>
+                    <div class="sub">tool invocations</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Credits Used</div>
+                    <div class="value">${{ "%.2f"|format(workflows|sum(attribute='total_credits')|default(0)) }}</div>
+                    <div class="sub">across all runs</div>
+                </div>
+                <div class="stat-card">
+                    <div class="label">Avg Duration</div>
+                    <div class="value">
+                        {% if workflows %}
+                            {{ "%.1f"|format((workflows|sum(attribute='total_duration_ms')|default(0)) / (workflows|length) / 1000) }}s
+                        {% else %}
+                            &mdash;
+                        {% endif %}
+                    </div>
+                    <div class="sub">per workflow</div>
+                </div>
+            </div>
+
+            <!-- Workflow List -->
+            <div class="section">
+                <div class="section-header">
+                    <h2>Recent Workflows</h2>
+                </div>
+
+                {% if workflows %}
+                <div id="workflow-list">
+                    {% for wf in workflows %}
+                    <div class="card" style="cursor:pointer;transition:all 0.15s;" onclick="toggleWorkflowSteps('{{ wf.workflow_id }}')" id="wf-card-{{ wf.workflow_id[:8] }}">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                            <div style="display:flex;align-items:center;gap:14px;">
+                                <div style="width:36px;height:36px;border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:16px;
+                                    {% if wf.status == 'success' %}background:#064e3b;{% elif wf.status == 'failed' %}background:#7f1d1d;{% else %}background:#78350f;{% endif %}">
+                                    {% if wf.status == 'success' %}&#x2705;{% elif wf.status == 'failed' %}&#x274c;{% else %}&#x26a0;{% endif %}
+                                </div>
+                                <div>
+                                    <div style="font-weight:600;font-size:14px;color:#f0f0f5;">
+                                        Workflow
+                                        <span class="fingerprint">{{ wf.workflow_id[:8] }}</span>
+                                    </div>
+                                    <div style="font-size:12px;color:#6b7280;margin-top:2px;">
+                                        {{ wf.started_at.strftime('%b %d, %Y %H:%M') if wf.started_at else 'Unknown' }}
+                                        &middot;
+                                        {{ wf.step_count }} step{{ 's' if wf.step_count != 1 else '' }}
+                                        &middot;
+                                        {{ "%.1f"|format(wf.total_duration_ms / 1000) }}s
+                                    </div>
+                                </div>
+                            </div>
+                            <div style="display:flex;align-items:center;gap:12px;">
+                                {% if wf.total_credits > 0 %}
+                                <span style="font-size:13px;color:#818cf8;font-weight:500;">${{ "%.2f"|format(wf.total_credits) }}</span>
+                                {% else %}
+                                <span style="font-size:12px;color:#6b7280;">Free</span>
+                                {% endif %}
+                                <span class="tag tag-{{ wf.status }}">{{ wf.status }}</span>
+                                <span id="wf-arrow-{{ wf.workflow_id[:8] }}" style="color:#6b7280;font-size:12px;transition:transform 0.2s;">&#x25B6;</span>
+                            </div>
+                        </div>
+                        <!-- Tools used badges -->
+                        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;">
+                            {% for tool in wf.tools_used %}
+                            <span style="background:#1a1a26;color:#9ca3af;font-size:10px;padding:2px 8px;border-radius:4px;">{{ tool.replace('nrv_', '') }}</span>
+                            {% endfor %}
+                        </div>
+                    </div>
+                    <!-- Expandable steps container -->
+                    <div id="wf-steps-{{ wf.workflow_id[:8] }}" style="display:none;margin:-8px 0 16px 0;padding:0 12px;">
+                        <div style="background:#0f0f17;border:1px solid #1e1e2e;border-radius:0 0 12px 12px;padding:4px 0;overflow:hidden;">
+                            <div style="text-align:center;padding:16px;color:#6b7280;font-size:12px;" id="wf-loading-{{ wf.workflow_id[:8] }}">
+                                Loading steps...
+                            </div>
+                        </div>
+                    </div>
+                    {% endfor %}
+                </div>
+                {% else %}
+                <div class="card" style="text-align:center;padding:60px 20px;">
+                    <div style="font-size:32px;margin-bottom:12px;">&#x1F50D;</div>
+                    <h3 style="margin-bottom:8px;color:#f0f0f5;">No runs yet</h3>
+                    <p style="color:#6b7280;font-size:13px;">
+                        When you use nrv tools in Claude Code, each session will appear here as a workflow
+                        with its individual tool invocations as steps.
+                    </p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const TENANT_ID = '{{ tenant_id }}';
+
+        function getAuthHeaders() {
+            return { 'Content-Type': 'application/json' };
+        }
+
+        // All fetch calls include credentials so the HttpOnly cookie is sent
+        const _origFetch = window.fetch;
+        window.fetch = function(url, opts) {
+            opts = opts || {};
+            opts.credentials = 'same-origin';
+            return _origFetch.call(this, url, opts).then(resp => {
+                if (resp.status === 401) {
+                    window.location.href = '/api/v1/auth/login';
+                }
+                return resp;
+            });
+        };
+
+        function showToast(message, type) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.className = 'toast ' + type + ' show';
+            setTimeout(() => { toast.className = 'toast'; }, 3200);
+        }
+
+        // ---- API Keys ----
+
+        function toggleKeyInput(provider) {
+            const row = document.getElementById('key-input-' + provider);
+            row.classList.toggle('show');
+        }
+
+        async function saveKey(provider) {
+            const input = document.getElementById('key-value-' + provider);
+            const apiKey = input.value.trim();
+            if (!apiKey) { showToast('Please enter an API key', 'error'); return; }
+
+            try {
+                const resp = await fetch('/api/v1/keys', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ provider: provider, api_key: apiKey }),
+                });
+                if (resp.ok) {
+                    showToast(provider + ' key saved and encrypted', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    const err = await resp.json();
+                    showToast('Error: ' + (err.detail || 'Failed to save key'), 'error');
+                }
+            } catch (e) {
+                showToast('Network error: ' + e.message, 'error');
+            }
+        }
+
+        async function removeKey(provider) {
+            if (!confirm('Remove your ' + provider + ' key and fall back to platform default?')) return;
+            try {
+                const resp = await fetch('/api/v1/keys/' + provider, {
+                    method: 'DELETE',
+                    headers: getAuthHeaders(),
+                });
+                if (resp.ok || resp.status === 204) {
+                    showToast(provider + ' key removed, using platform default', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    const err = await resp.json();
+                    showToast('Error: ' + (err.detail || 'Failed to remove key'), 'error');
+                }
+            } catch (e) {
+                showToast('Network error: ' + e.message, 'error');
+            }
+        }
+
+        // ---- Connections ----
+
+        function filterConnections(category) {
+            const cards = document.querySelectorAll('.conn-card');
+            const btns = document.querySelectorAll('.filter-btn');
+
+            btns.forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+
+            cards.forEach(card => {
+                if (category === 'all' || card.dataset.category === category) {
+                    card.style.display = '';
+                } else {
+                    card.style.display = 'none';
+                }
+            });
+        }
+
+        async function connectApp(appId) {
+            try {
+                const resp = await fetch('/api/v1/connections/initiate', {
+                    method: 'POST',
+                    headers: getAuthHeaders(),
+                    body: JSON.stringify({ app_id: appId }),
+                });
+                const data = await resp.json();
+                if (resp.ok) {
+                    if (data.redirect_url) {
+                        showToast('Opening ' + appId + ' authorization...', 'success');
+                        var connId = data.connection_id;
+                        var popup = window.open(
+                            data.redirect_url,
+                            'nrv_oauth',
+                            'width=600,height=700,scrollbars=yes'
+                        );
+                        // Poll for: (a) connection becoming ACTIVE, or (b) popup closing
+                        var attempts = 0;
+                        var maxAttempts = 120; // 2 minutes at 1s intervals
+                        var pollTimer = setInterval(async function() {
+                            attempts++;
+                            var popupClosed = !popup || popup.closed;
+                            // Check connection status via API
+                            try {
+                                var checkResp = await fetch('/api/v1/connections', {
+                                    headers: getAuthHeaders(),
+                                });
+                                var checkData = await checkResp.json();
+                                var conn = (checkData.connections || []).find(
+                                    function(c) { return c.id === connId && c.status === 'ACTIVE'; }
+                                );
+                                if (conn) {
+                                    clearInterval(pollTimer);
+                                    showToast(appId + ' connected successfully!', 'success');
+                                    if (popup && !popup.closed) popup.close();
+                                    setTimeout(function() { location.reload(); }, 1000);
+                                    return;
+                                }
+                            } catch(e) { /* ignore fetch errors during polling */ }
+                            // If popup closed without connecting, just reload to update status
+                            if (popupClosed) {
+                                clearInterval(pollTimer);
+                                location.reload();
+                                return;
+                            }
+                            if (attempts >= maxAttempts) {
+                                clearInterval(pollTimer);
+                                showToast('Authorization timed out. Please try again.', 'error');
+                            }
+                        }, 1000);
+                    } else {
+                        showToast(data.message || (appId + ' connected!'), 'success');
+                        setTimeout(() => location.reload(), 1500);
+                    }
+                } else {
+                    showToast('Error: ' + (data.detail || 'Connection failed'), 'error');
+                }
+            } catch (e) {
+                showToast('Network error: ' + e.message, 'error');
+            }
+        }
+
+        async function disconnectApp(appId, appName) {
+            if (!confirm('Disconnect ' + appName + '?')) return;
+            try {
+                const listResp = await fetch('/api/v1/connections', {
+                    headers: getAuthHeaders(),
+                });
+                const listData = await listResp.json();
+                const conn = (listData.connections || []).find(c => c.app_id === appId);
+                if (conn) {
+                    await fetch('/api/v1/connections/' + conn.id, {
+                        method: 'DELETE',
+                        headers: getAuthHeaders(),
+                    });
+                    showToast(appName + ' disconnected', 'success');
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showToast(appName + ' not found in active connections', 'error');
+                }
+            } catch (e) {
+                showToast('Network error: ' + e.message, 'error');
+            }
+        }
+
+        // ---- Runs ----
+
+        const _loadedWorkflows = {};
+
+        async function toggleWorkflowSteps(workflowId) {
+            const shortId = workflowId.substring(0, 8);
+            const container = document.getElementById('wf-steps-' + shortId);
+            const arrow = document.getElementById('wf-arrow-' + shortId);
+
+            if (!container) return;
+
+            if (container.style.display === 'none') {
+                container.style.display = 'block';
+                arrow.style.transform = 'rotate(90deg)';
+
+                // Load steps if not already loaded
+                if (!_loadedWorkflows[workflowId]) {
+                    try {
+                        const resp = await fetch('/api/v1/runs/' + workflowId, {
+                            headers: getAuthHeaders(),
+                        });
+                        const data = await resp.json();
+                        if (data.steps) {
+                            _loadedWorkflows[workflowId] = data.steps;
+                            renderWorkflowSteps(shortId, data.steps);
+                        } else {
+                            document.getElementById('wf-loading-' + shortId).textContent = 'No steps found';
+                        }
+                    } catch (e) {
+                        document.getElementById('wf-loading-' + shortId).textContent = 'Failed to load steps';
+                    }
+                }
+            } else {
+                container.style.display = 'none';
+                arrow.style.transform = 'rotate(0deg)';
+            }
+        }
+
+        function renderWorkflowSteps(shortId, steps) {
+            const wrapper = document.getElementById('wf-steps-' + shortId).querySelector('div');
+            if (!steps.length) {
+                wrapper.innerHTML = '<div style="text-align:center;padding:16px;color:#6b7280;font-size:12px;">No steps recorded</div>';
+                return;
+            }
+
+            let html = '<table style="margin:0;border:none;border-radius:0;">';
+            html += '<thead><tr><th style="background:#0a0a0f;">#</th><th style="background:#0a0a0f;">Tool</th><th style="background:#0a0a0f;">Operation</th><th style="background:#0a0a0f;">Status</th><th style="background:#0a0a0f;">Duration</th><th style="background:#0a0a0f;">Credits</th><th style="background:#0a0a0f;">Time</th></tr></thead>';
+            html += '<tbody>';
+
+            steps.forEach(function(step, idx) {
+                const toolDisplay = (step.tool_name || '').replace('nrv_', '');
+                const statusClass = step.status === 'success' ? 'tag-active' : step.status === 'failed' ? 'tag-disconnected' : 'tag-pending';
+                const duration = step.duration_ms ? (step.duration_ms / 1000).toFixed(1) + 's' : '—';
+                const credits = step.credits_charged > 0 ? '$' + step.credits_charged.toFixed(2) : '—';
+                const time = step.created_at ? new Date(step.created_at).toLocaleTimeString() : '—';
+
+                // Build details from params_summary
+                let details = '';
+                const p = step.params_summary || {};
+                if (p.q || p.query) details = (p.q || p.query).substring(0, 60);
+                else if (p.email) details = p.email;
+                else if (p.domain) details = p.domain;
+                else if (p.action) details = p.action;
+                else if (p.app_id) details = p.app_id;
+                else if (p.platform) details = p.platform;
+
+                html += '<tr style="background:#0f0f17;">';
+                html += '<td style="color:#6b7280;font-size:11px;">' + (idx + 1) + '</td>';
+                html += '<td><strong style="color:#818cf8;font-size:12px;">' + toolDisplay + '</strong>';
+                if (details) html += '<div style="font-size:11px;color:#6b7280;margin-top:2px;">' + details + '</div>';
+                html += '</td>';
+                html += '<td style="font-size:12px;color:#9ca3af;">' + (step.operation || '—') + '</td>';
+                html += '<td><span class="tag ' + statusClass + '">' + step.status + '</span></td>';
+                html += '<td style="font-size:12px;color:#9ca3af;">' + duration + '</td>';
+                html += '<td style="font-size:12px;color:#9ca3af;">' + credits + '</td>';
+                html += '<td style="font-size:11px;color:#6b7280;">' + time + '</td>';
+                html += '</tr>';
+
+                // Show error if failed
+                if (step.status === 'failed' && step.error_message) {
+                    html += '<tr style="background:#0f0f17;"><td colspan="7" style="padding:4px 16px 12px;font-size:11px;color:#fca5a5;">';
+                    html += '&#x26a0; ' + step.error_message;
+                    html += '</td></tr>';
+                }
+            });
+
+            html += '</tbody></table>';
+            wrapper.innerHTML = html;
+        }
+    </script>
+</body>
+</html>
