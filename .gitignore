@@ -5,7 +5,7 @@
 # === SECRETS (NEVER COMMIT) ===
 .env
 .env.*
-*.env
+!.env.example
 *.key
 *.pem
 *.secret
