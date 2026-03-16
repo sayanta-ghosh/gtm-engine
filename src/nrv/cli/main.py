@@ -15,6 +15,7 @@ def cli() -> None:
 
 # ---- Register subcommands ------------------------------------------------
 
+from nrv.cli.init import init  # noqa: E402  — one-command setup
 from nrv.cli.auth import auth  # noqa: E402
 from nrv.cli.enrich import enrich  # noqa: E402
 from nrv.cli.search import search  # noqa: E402
@@ -29,6 +30,7 @@ from nrv.cli.status import status  # noqa: E402
 from nrv.cli.web import web  # noqa: E402
 from nrv.mcp.run import mcp  # noqa: E402
 
+cli.add_command(init)  # nrv init — primary onboarding entry point
 cli.add_command(auth)
 cli.add_command(status)
 cli.add_command(enrich)
