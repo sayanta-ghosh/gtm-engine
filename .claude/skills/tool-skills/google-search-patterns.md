@@ -43,11 +43,12 @@ site:x.com [person] [topic]
 ```
 **Note:** Both domains work. x.com is newer but twitter.com often has better historical indexing.
 
-### LinkedIn Indexing Lag — Critical
-Google indexes LinkedIn posts with a **significant delay** (hours to days). Time-based search (`tbs`) implications:
-- `qdr:h2` (2 hours) → **will return 0 results** for LinkedIn posts. Too aggressive.
-- `qdr:d` (24 hours) → **practical minimum** for LinkedIn. Works but may miss recent posts.
-- `qdr:w` (1 week) → **most reliable** for comprehensive LinkedIn post discovery.
+### LinkedIn Indexing Lag — Be Aware
+Google indexes LinkedIn posts with a **significant delay** (hours to days). Time-based search (`tbs`) behavior:
+- `qdr:h2` (2 hours) → **may return 0 results** due to indexing lag. Still try it if the user asks — but warn them upfront and be ready to widen the window if empty.
+- `qdr:d` (24 hours) → usually works but may miss some recent posts.
+- `qdr:w` (1 week) → most reliable for comprehensive LinkedIn post discovery.
+- **Always respect the user's requested time window.** If they say "last 2 hours", search with `qdr:h2` first. If 0 results, explain the lag and offer to widen (don't silently override).
 - This lag does NOT affect other platforms (Reddit, Twitter, news sites are indexed near-real-time).
 
 ### Job Boards (Hiring Signal Discovery)

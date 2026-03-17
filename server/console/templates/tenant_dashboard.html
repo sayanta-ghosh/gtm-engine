@@ -656,7 +656,11 @@
                                 </div>
                                 <div>
                                     <div style="font-weight:600;font-size:14px;color:#f0f0f5;">
+                                        {% if wf.workflow_label %}
+                                        {{ wf.workflow_label }}
+                                        {% else %}
                                         Workflow
+                                        {% endif %}
                                         <span class="fingerprint">{{ wf.workflow_id[:8] }}</span>
                                     </div>
                                     <div style="font-size:12px;color:#6b7280;margin-top:2px;">
@@ -935,7 +939,7 @@
             }
 
             let html = '<table style="margin:0;border:none;border-radius:0;">';
-            html += '<thead><tr><th style="background:#0a0a0f;">#</th><th style="background:#0a0a0f;">Tool</th><th style="background:#0a0a0f;">Operation</th><th style="background:#0a0a0f;">Status</th><th style="background:#0a0a0f;">Duration</th><th style="background:#0a0a0f;">Credits</th><th style="background:#0a0a0f;">Time</th></tr></thead>';
+            html += '<thead><tr><th style="background:#0a0a0f;">#</th><th style="background:#0a0a0f;">Tool</th><th style="background:#0a0a0f;">Operation</th><th style="background:#0a0a0f;">Status</th><th style="background:#0a0a0f;">Duration</th><th style="background:#0a0a0f;">Credits</th><th style="background:#0a0a0f;">Time</th><th style="background:#0a0a0f;">Data</th></tr></thead>';
             html += '<tbody>';
 
             steps.forEach(function(step, idx) {
@@ -944,6 +948,7 @@
                 const duration = step.duration_ms ? (step.duration_ms / 1000).toFixed(1) + 's' : '—';
                 const credits = step.credits_charged > 0 ? '$' + step.credits_charged.toFixed(2) : '—';
                 const time = step.created_at ? new Date(step.created_at).toLocaleTimeString() : '—';
+                const stepDataId = shortId + '-step-' + idx;
 
                 // Build details from params_summary
                 let details = '';
@@ -955,6 +960,12 @@
                 else if (p.app_id) details = p.app_id;
                 else if (p.platform) details = p.platform;
 
+                // Check if step has viewable result data
+                const rs = step.result_summary || {};
+                const hasResults = rs.results && rs.results.length > 0;
+                const hasProfile = rs.person || rs.company || rs.profile || rs.data;
+                const hasData = hasResults || hasProfile;
+
                 html += '<tr style="background:#0f0f17;">';
                 html += '<td style="color:#6b7280;font-size:11px;">' + (idx + 1) + '</td>';
                 html += '<td><strong style="color:#818cf8;font-size:12px;">' + toolDisplay + '</strong>';
@@ -965,18 +976,115 @@
                 html += '<td style="font-size:12px;color:#9ca3af;">' + duration + '</td>';
                 html += '<td style="font-size:12px;color:#9ca3af;">' + credits + '</td>';
                 html += '<td style="font-size:11px;color:#6b7280;">' + time + '</td>';
+                html += '<td>';
+                if (hasData) {
+                    const count = hasResults ? rs.results.length + ' rows' : '1 record';
+                    html += '<button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();toggleStepData(\'' + stepDataId + '\')" style="font-size:10px;padding:3px 10px;">' + count + ' &#x25BC;</button>';
+                } else if (rs.error) {
+                    html += '<span style="font-size:10px;color:#fca5a5;">error</span>';
+                } else {
+                    html += '<span style="font-size:10px;color:#6b7280;">—</span>';
+                }
+                html += '</td>';
                 html += '</tr>';
 
                 // Show error if failed
-                if (step.status === 'failed' && step.error_message) {
-                    html += '<tr style="background:#0f0f17;"><td colspan="7" style="padding:4px 16px 12px;font-size:11px;color:#fca5a5;">';
-                    html += '&#x26a0; ' + step.error_message;
+                if (step.status === 'failed' && (step.error_message || rs.error)) {
+                    html += '<tr style="background:#0f0f17;"><td colspan="8" style="padding:4px 16px 12px;font-size:11px;color:#fca5a5;">';
+                    html += '&#x26a0; ' + (rs.error || step.error_message);
+                    html += '</td></tr>';
+                }
+
+                // Data viewer row (hidden by default)
+                if (hasData) {
+                    html += '<tr id="' + stepDataId + '" style="display:none;background:#0a0a12;">';
+                    html += '<td colspan="8" style="padding:0;">';
+                    html += renderStepData(rs, p);
                     html += '</td></tr>';
                 }
             });
 
             html += '</tbody></table>';
             wrapper.innerHTML = html;
+        }
+
+        function toggleStepData(stepDataId) {
+            const row = document.getElementById(stepDataId);
+            if (!row) return;
+            row.style.display = row.style.display === 'none' ? 'table-row' : 'none';
+        }
+
+        function escHtml(str) {
+            if (str == null) return '';
+            return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        function renderStepData(resultSummary, paramsSummary) {
+            const rs = resultSummary;
+            let html = '<div style="padding:12px 20px;max-height:400px;overflow:auto;">';
+
+            // Query context
+            if (rs.query) {
+                html += '<div style="font-size:11px;color:#6b7280;margin-bottom:8px;">Query: <span style="color:#818cf8;">' + escHtml(rs.query) + '</span></div>';
+            }
+
+            // Search results → table
+            if (rs.results && rs.results.length > 0) {
+                const results = rs.results;
+                // Detect columns from first result
+                const cols = Object.keys(results[0]).filter(k => k !== 'position');
+                html += '<table style="margin:0;border:1px solid #1e1e2e;font-size:11px;">';
+                html += '<thead><tr style="background:#12121a;">';
+                html += '<th style="background:#12121a;font-size:10px;padding:6px 10px;">#</th>';
+                cols.forEach(function(col) {
+                    html += '<th style="background:#12121a;font-size:10px;padding:6px 10px;">' + escHtml(col) + '</th>';
+                });
+                html += '</tr></thead><tbody>';
+                results.forEach(function(row, i) {
+                    html += '<tr style="background:#0f0f17;">';
+                    html += '<td style="padding:6px 10px;color:#6b7280;font-size:10px;">' + (i + 1) + '</td>';
+                    cols.forEach(function(col) {
+                        let val = row[col];
+                        if (val == null) val = '';
+                        const valStr = String(val);
+                        // Render URLs as clickable links
+                        if (col === 'url' || col === 'link' || col === 'linkedin_url') {
+                            html += '<td style="padding:6px 10px;font-size:10px;"><a href="' + escHtml(valStr) + '" target="_blank" style="color:#818cf8;word-break:break-all;">' + escHtml(valStr.substring(0, 60)) + (valStr.length > 60 ? '...' : '') + '</a></td>';
+                        } else if (valStr.length > 120) {
+                            html += '<td style="padding:6px 10px;font-size:10px;color:#9ca3af;" title="' + escHtml(valStr) + '">' + escHtml(valStr.substring(0, 120)) + '...</td>';
+                        } else {
+                            html += '<td style="padding:6px 10px;font-size:10px;color:#9ca3af;">' + escHtml(valStr) + '</td>';
+                        }
+                    });
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+            }
+
+            // Person/company/profile data → key-value table
+            const profileData = rs.person || rs.company || rs.profile || rs.data;
+            if (profileData && typeof profileData === 'object') {
+                html += '<table style="margin:0;border:1px solid #1e1e2e;font-size:11px;">';
+                html += '<thead><tr style="background:#12121a;"><th style="background:#12121a;font-size:10px;padding:6px 10px;width:140px;">Field</th><th style="background:#12121a;font-size:10px;padding:6px 10px;">Value</th></tr></thead><tbody>';
+                Object.keys(profileData).forEach(function(key) {
+                    let val = profileData[key];
+                    if (val == null || val === '') return;
+                    if (typeof val === 'object') val = JSON.stringify(val);
+                    const valStr = String(val);
+                    html += '<tr style="background:#0f0f17;">';
+                    html += '<td style="padding:5px 10px;font-size:10px;color:#818cf8;font-weight:500;">' + escHtml(key) + '</td>';
+                    if (valStr.startsWith('http')) {
+                        html += '<td style="padding:5px 10px;font-size:10px;"><a href="' + escHtml(valStr) + '" target="_blank" style="color:#818cf8;">' + escHtml(valStr.substring(0, 80)) + '</a></td>';
+                    } else {
+                        html += '<td style="padding:5px 10px;font-size:10px;color:#9ca3af;">' + escHtml(valStr.substring(0, 200)) + '</td>';
+                    }
+                    html += '</tr>';
+                });
+                html += '</tbody></table>';
+            }
+
+            html += '</div>';
+            return html;
         }
     </script>
 </body>

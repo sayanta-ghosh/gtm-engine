@@ -208,6 +208,16 @@ class RunStepMiddleware(BaseHTTPMiddleware):
 
         duration_ms = int((time.monotonic() - start_time) * 1000)
 
+        # Read response body so we can capture result data for run logs.
+        # BaseHTTPMiddleware wraps the response as a StreamingResponse,
+        # so we need to consume and re-wrap it.
+        resp_body_bytes = b""
+        async for chunk in response.body_iterator:  # type: ignore[union-attr]
+            if isinstance(chunk, str):
+                resp_body_bytes += chunk.encode("utf-8")
+            else:
+                resp_body_bytes += chunk
+
         # Determine status
         if response.status_code < 400:
             step_status = "success"
@@ -216,26 +226,64 @@ class RunStepMiddleware(BaseHTTPMiddleware):
             step_status = "failed"
             error_msg = f"HTTP {response.status_code}"
 
-        # Extract result summary from response body
+        # Parse response body to extract result summary
+        import json as _json
         result_summary: dict[str, Any] = {"http_status": response.status_code}
-        # Note: We can't easily read streaming response body in middleware,
-        # so we rely on the status code and headers for summary.
-        # The detailed result is available in enrichment_log for execute calls.
+        resp_json: dict[str, Any] | None = None
+        try:
+            resp_json = _json.loads(resp_body_bytes)
+        except Exception:
+            pass
+
+        if resp_json:
+            result_summary = _summarize_result(response.status_code, resp_json)
+            # Store the full result data (truncated for large responses)
+            result_data = resp_json.get("result")
+            if result_data and isinstance(result_data, dict):
+                # For search results: store the results array
+                results_list = result_data.get("results")
+                if isinstance(results_list, list):
+                    result_summary["result_count"] = len(results_list)
+                    # Store up to 50 results (truncate for very large responses)
+                    result_summary["results"] = results_list[:50]
+                    result_summary["query"] = result_data.get("query", "")
+                # For enrichment: store the enriched profile
+                for key in ("person", "company", "profile", "data"):
+                    if key in result_data and isinstance(result_data[key], dict):
+                        result_summary[key] = result_data[key]
+                        break
+            # Capture error detail on failure
+            if resp_json.get("detail"):
+                result_summary["error"] = str(resp_json["detail"])[:500]
 
         # Extract operation and provider from params_summary
         operation = params_summary.pop("operation", None)
         provider = params_summary.pop("provider", None)
 
-        # Credits from response headers (if we add them)
-        credits_str = response.headers.get("X-Credits-Charged", "0")
-        try:
-            credits_charged = float(credits_str)
-        except (ValueError, TypeError):
-            credits_charged = 0.0
+        # Credits from response body or headers
+        credits_charged = 0.0
+        if resp_json and "credits_charged" in resp_json:
+            try:
+                credits_charged = float(resp_json["credits_charged"])
+            except (ValueError, TypeError):
+                pass
+        if credits_charged == 0.0:
+            credits_str = response.headers.get("X-Credits-Charged", "0")
+            try:
+                credits_charged = float(credits_str)
+            except (ValueError, TypeError):
+                pass
 
         # Only log if we have a tenant_id
         if not tenant_id:
-            return response
+            # Re-wrap response body before returning
+            from starlette.responses import Response as StarletteResponse
+            return StarletteResponse(
+                content=resp_body_bytes,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
 
         # Log the run step asynchronously (don't block the response)
         try:
@@ -264,4 +312,11 @@ class RunStepMiddleware(BaseHTTPMiddleware):
                 exc_info=True,
             )
 
-        return response
+        # Re-wrap response body since we consumed the iterator
+        from starlette.responses import Response as StarletteResponse
+        return StarletteResponse(
+            content=resp_body_bytes,
+            status_code=response.status_code,
+            headers=dict(response.headers),
+            media_type=response.media_type,
+        )
