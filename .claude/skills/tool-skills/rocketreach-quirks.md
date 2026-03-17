@@ -290,6 +290,7 @@ GET /api/v2/person/lookup?id=12345
 | Overage | $0.30-$0.45/lookup | — | Beyond plan limits |
 
 **Credits do NOT roll over.** Set calendar reminders for renewal — auto-renewal is aggressive.
+**Full API access requires Ultimate plan ($2,099/yr) or higher.** Essentials and Pro have limited/no API access.
 
 ## Credit Types
 | Type | When Charged |
