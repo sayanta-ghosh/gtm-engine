@@ -29,7 +29,7 @@ server/            → FastAPI server (deployed to AWS)
   execution/       → Workflow execution, run logs, schedules, providers
   vault/           → BYOK key encryption (Fernet dev / KMS prod)
 
-migrations/        → SQL migration files for PostgreSQL (001-006)
+migrations/        → SQL migration files for PostgreSQL (001-007)
 infra/             → AWS CDK infrastructure (future)
 docs/              → Architecture documentation
 
@@ -63,7 +63,7 @@ nrv auth login
 nrv enrich person --email test@example.com
 ```
 
-## MCP Tools (21 tools)
+## MCP Tools (22 tools)
 
 | Tool | What It Does |
 |------|-------------|
@@ -82,6 +82,7 @@ nrv enrich person --email test@example.com
 | `nrv_append_rows` | Append/upsert rows to a persistent dataset |
 | `nrv_query_dataset` | Query rows from a persistent dataset |
 | `nrv_list_datasets` | List all persistent datasets |
+| `nrv_estimate_cost` | Estimate credit cost before executing (call before large batches) |
 | `nrv_credit_balance` | Check credit balance and spend |
 | `nrv_provider_status` | Check provider availability |
 | `nrv_list_connections` | List active OAuth connections |
@@ -179,15 +180,49 @@ psql -U nrv -d nrv -f migrations/003_credits.sql
 psql -U nrv -d nrv -f migrations/004_run_logs.sql
 psql -U nrv -d nrv -f migrations/005_datasets.sql
 psql -U nrv -d nrv -f migrations/006_scheduled_workflows.sql
+psql -U nrv -d nrv -f migrations/007_dashboard_datasets.sql
 ```
 
 All tables use RLS with tenant isolation. The `nrv_api` role has appropriate grants.
 
 ## Dashboard
 
-Tenant dashboard at `/console/{tenant_slug}` — 5 tabs:
+Tenant dashboard at `/console/{tenant_slug}` — 6 tabs:
 - **Keys**: BYOK key management with encrypted storage
 - **Connections**: OAuth app connections via Composio
 - **Usage**: Credit balance, consumption bar, per-operation costs, transaction ledger
 - **Runs**: Workflow run logs with step-level data viewer + scheduled workflows section
 - **Datasets**: Persistent dataset cards with column badges, row counts, data preview
+- **Dashboards**: Create/view/share dashboards backed by datasets, with inline builder UI
+
+### Hosted Dashboards
+
+Dashboards are server-rendered HTML from dataset data + widget config. No S3 deployment needed.
+
+- **Create**: Select a dataset, pick columns, name it → `POST /api/v1/dashboards`
+- **View**: `/console/{tenant_id}/dashboards/{dashboard_id}` (authenticated)
+- **Share**: `/d/{read_token}` (public, optional password protection)
+- **Widgets**: `table` (data table), `metric` (count/sum/avg aggregation)
+- Token-based access: `read_token` generated on creation, shareable without auth
+
+### CLI Commands (17 command groups)
+
+| Command | What It Does |
+|---------|-------------|
+| `nrv init` | One-command onboarding (auth + MCP registration) |
+| `nrv auth` | Login, logout, status |
+| `nrv status` | Account health check — auth, keys, credits, providers |
+| `nrv enrich` | Person/company/batch enrichment with --dry-run |
+| `nrv search` | People and company search |
+| `nrv web` | Google search, scrape, crawl, extract |
+| `nrv query` | SQL queries against data tables |
+| `nrv table` | List/describe/modify data tables |
+| `nrv keys` | BYOK API key management |
+| `nrv credits` | Balance, history, topup |
+| `nrv config` | Configuration management |
+| `nrv dashboard` | Deploy/list/remove dashboards |
+| `nrv datasets` | List, describe, query, export persistent datasets |
+| `nrv schedules` | List, enable, disable scheduled workflows |
+| `nrv feedback` | Submit feedback, bug reports, feature requests |
+| `nrv setup-claude` | Install skills + CLAUDE.md for Claude Code |
+| `nrv mcp` | Start MCP server on stdio |

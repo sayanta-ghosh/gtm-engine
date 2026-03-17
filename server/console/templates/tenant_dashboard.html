@@ -196,6 +196,10 @@
                 Datasets
                 <span class="tab-badge">{{ datasets_summary.total_datasets|default(0) }}</span>
             </a>
+            <a href="/console/{{ tenant_id }}?tab=dashboards" class="tab {% if active_tab == 'dashboards' %}active{% endif %}">
+                Dashboards
+                <span class="tab-badge">{{ dashboards_summary.total_dashboards|default(0) }}</span>
+            </a>
         </div>
 
         <!-- ============================================ -->
@@ -862,6 +866,88 @@
         </div>
     </div>
 
+        <!-- ============================================ -->
+        <!-- TAB: Dashboards                              -->
+        <!-- ============================================ -->
+        <div class="tab-content {% if active_tab == 'dashboards' %}active{% endif %}" id="tab-dashboards">
+            <div class="stats-row">
+                <div class="stat-card">
+                    <div class="stat-number">{{ dashboards_summary.total_dashboards|default(0) }}</div>
+                    <div class="stat-label">Dashboards</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-number" style="font-size:14px;color:#818cf8;">server-rendered</div>
+                    <div class="stat-label">Hosting</div>
+                </div>
+            </div>
+
+            <div style="margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;">
+                <h3 style="color:#f0f0f5;font-size:16px;font-weight:600;">Your Dashboards</h3>
+                <button onclick="toggleDashboardBuilder()" style="padding:8px 16px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;">+ Create Dashboard</button>
+            </div>
+
+            <!-- Dashboard Builder (hidden by default) -->
+            <div id="dashboard-builder" style="display:none;margin-bottom:20px;" class="card">
+                <h4 style="margin-bottom:12px;color:#f0f0f5;">New Dashboard</h4>
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px;">
+                    <div>
+                        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Name</label>
+                        <input id="db-name" type="text" placeholder="e.g. Lead Tracker" style="width:100%;padding:8px 12px;background:#0d0d14;border:1px solid #1e1e2e;border-radius:6px;color:#fff;font-size:13px;">
+                    </div>
+                    <div>
+                        <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Dataset</label>
+                        <select id="db-dataset" onchange="onDatasetSelect()" style="width:100%;padding:8px 12px;background:#0d0d14;border:1px solid #1e1e2e;border-radius:6px;color:#fff;font-size:13px;">
+                            <option value="">Select a dataset...</option>
+                            {% for ds in datasets %}
+                            <option value="{{ ds.id }}" data-cols='{{ ds.columns|tojson }}'>{{ ds.name }} ({{ ds.row_count }} rows)</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                </div>
+                <div id="db-columns-wrap" style="display:none;margin-bottom:12px;">
+                    <label style="font-size:12px;color:#888;display:block;margin-bottom:4px;">Columns to display</label>
+                    <div id="db-columns" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+                </div>
+                <div style="display:flex;gap:8px;">
+                    <button onclick="createDashboard()" style="padding:8px 20px;background:linear-gradient(135deg,#667eea,#764ba2);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;">Create</button>
+                    <button onclick="toggleDashboardBuilder()" style="padding:8px 20px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:8px;color:#888;font-size:13px;cursor:pointer;">Cancel</button>
+                </div>
+            </div>
+
+            {% if dashboards %}
+            <div class="provider-grid">
+                {% for db in dashboards %}
+                <div class="card">
+                    <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+                        <div>
+                            <h3 style="font-size:15px;font-weight:600;color:#f0f0f5;margin-bottom:4px;">{{ db.name }}</h3>
+                            <div style="font-size:12px;color:#888;">
+                                Source: <span style="color:#818cf8;">{{ db.dataset_name }}</span>
+                                &middot; {{ db.widget_count }} widget{{ 's' if db.widget_count != 1 }}
+                            </div>
+                        </div>
+                        <div style="display:flex;gap:6px;">
+                            <a href="/console/{{ tenant_id }}/dashboards/{{ db.id }}" style="padding:6px 12px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;color:#818cf8;font-size:12px;text-decoration:none;">View</a>
+                            <button onclick="deleteDashboard('{{ db.id }}')" style="padding:6px 12px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;color:#ef4444;font-size:12px;cursor:pointer;">Delete</button>
+                        </div>
+                    </div>
+                    <div style="margin-top:8px;font-size:11px;color:#555;">
+                        Updated {{ db.updated_at.strftime('%b %d, %Y at %H:%M') if db.updated_at else 'N/A' }}
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+            {% else %}
+            <div class="card" style="text-align:center;padding:40px 20px;">
+                <div style="font-size:32px;margin-bottom:12px;">📊</div>
+                <h3 style="margin-bottom:8px;color:#f0f0f5;">No dashboards yet</h3>
+                <p style="font-size:13px;color:#888;">
+                    Create a dashboard from one of your datasets to visualize and share your data.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+
     <script>
         const TENANT_ID = '{{ tenant_id }}';
 
@@ -1334,6 +1420,67 @@
             });
             container.innerHTML = html;
         })();
+
+
+        // ---- Dashboard Builder Functions ----
+        function toggleDashboardBuilder() {
+            const el = document.getElementById('dashboard-builder');
+            el.style.display = el.style.display === 'none' ? 'block' : 'none';
+        }
+
+        function onDatasetSelect() {
+            const sel = document.getElementById('db-dataset');
+            const opt = sel.options[sel.selectedIndex];
+            const wrap = document.getElementById('db-columns-wrap');
+            const container = document.getElementById('db-columns');
+            if (!opt.value) { wrap.style.display = 'none'; return; }
+            const cols = JSON.parse(opt.getAttribute('data-cols') || '[]');
+            container.innerHTML = '';
+            cols.forEach(function(c) {
+                const label = document.createElement('label');
+                label.style.cssText = 'display:flex;align-items:center;gap:4px;padding:4px 10px;background:#1a1a2e;border-radius:6px;font-size:12px;color:#ccc;cursor:pointer;';
+                label.innerHTML = '<input type="checkbox" checked value="' + (c.name || c) + '" style="accent-color:#818cf8;"> ' + (c.name || c);
+                container.appendChild(label);
+            });
+            wrap.style.display = 'block';
+        }
+
+        function createDashboard() {
+            const name = document.getElementById('db-name').value.trim();
+            const datasetId = document.getElementById('db-dataset').value;
+            if (!name || !datasetId) { alert('Please enter a name and select a dataset.'); return; }
+
+            const checks = document.querySelectorAll('#db-columns input[type=checkbox]:checked');
+            const columns = Array.from(checks).map(function(cb) { return cb.value; });
+
+            const config = { widgets: [{ type: 'table', title: 'All Data', columns: columns, sort_by: null, sort_dir: 'desc', limit: 100 }] };
+
+            fetch('/api/v1/dashboards', {
+                method: 'POST',
+                headers: getAuthHeaders(),
+                body: JSON.stringify({ name: name, dataset_id: datasetId, config: config }),
+                credentials: 'same-origin'
+            })
+            .then(function(r) { return r.json(); })
+            .then(function(data) {
+                if (data.read_token) {
+                    alert('Dashboard created! Share token: ' + data.read_token);
+                }
+                window.location.reload();
+            })
+            .catch(function(e) { alert('Error: ' + e.message); });
+        }
+
+        function deleteDashboard(id) {
+            if (!confirm('Delete this dashboard?')) return;
+            fetch('/api/v1/dashboards/' + id, {
+                method: 'DELETE',
+                headers: getAuthHeaders(),
+                credentials: 'same-origin'
+            })
+            .then(function() { window.location.reload(); })
+            .catch(function(e) { alert('Error: ' + e.message); });
+        }
     </script>
 </body>
 </html>

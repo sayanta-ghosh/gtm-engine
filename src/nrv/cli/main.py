@@ -29,6 +29,9 @@ from nrv.cli.setup import setup_claude  # noqa: E402
 from nrv.cli.status import status  # noqa: E402
 from nrv.cli.web import web  # noqa: E402
 from nrv.mcp.run import mcp  # noqa: E402
+from nrv.cli.datasets import datasets  # noqa: E402
+from nrv.cli.schedules import schedules  # noqa: E402
+from nrv.cli.feedback import feedback  # noqa: E402
 
 cli.add_command(init)  # nrv init — primary onboarding entry point
 cli.add_command(auth)
@@ -44,3 +47,6 @@ cli.add_command(dashboard)
 cli.add_command(setup_claude)
 cli.add_command(web)
 cli.add_command(mcp)
+cli.add_command(datasets)
+cli.add_command(schedules)
+cli.add_command(feedback)

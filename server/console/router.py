@@ -20,6 +20,8 @@ from server.auth.models import Tenant
 from server.billing.models import CreditBalance, CreditLedger
 from server.core.config import settings
 from server.core.database import get_db, set_tenant_context
+from server.dashboards.models import Dashboard as DashboardModel
+from server.dashboards.service import render_dashboard_html, render_password_page, verify_password
 from server.data.dataset_models import Dataset, DatasetRow
 from server.execution.run_models import RunStep
 from server.execution.schedule_models import ScheduledWorkflow
@@ -290,7 +292,7 @@ async def console_root(request: Request):
 async def tenant_dashboard(
     request: Request,
     tenant_id: str,
-    tab: str = Query("keys", pattern="^(keys|connections|usage|runs|datasets)$"),
+    tab: str = Query("keys", pattern="^(keys|connections|usage|runs|datasets|dashboards)$"),
     token: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
 ):
@@ -577,6 +579,45 @@ async def tenant_dashboard(
     ]
 
     # ------------------------------------------------------------------
+    # Dashboards tab data
+    # ------------------------------------------------------------------
+    dashboards_result = await db.execute(
+        select(DashboardModel)
+        .where(DashboardModel.tenant_id == tenant.id, DashboardModel.status == "active")
+        .order_by(DashboardModel.updated_at.desc())
+    )
+    tenant_dashboards = dashboards_result.scalars().all()
+
+    # Map dataset IDs to names for display
+    dash_dataset_ids = [d.dataset_id for d in tenant_dashboards if d.dataset_id]
+    dash_ds_names: dict[str, str] = {}
+    if dash_dataset_ids:
+        dash_ds_result = await db.execute(
+            select(Dataset).where(Dataset.id.in_(dash_dataset_ids))
+        )
+        for ds in dash_ds_result.scalars().all():
+            dash_ds_names[str(ds.id)] = ds.name
+
+    dashboards_list = []
+    for d in tenant_dashboards:
+        config = d.config or {}
+        widgets = config.get("widgets", [])
+        dashboards_list.append({
+            "id": str(d.id),
+            "name": d.name,
+            "dataset_id": str(d.dataset_id) if d.dataset_id else None,
+            "dataset_name": dash_ds_names.get(str(d.dataset_id), "—") if d.dataset_id else "—",
+            "widget_count": len(widgets),
+            "read_token_hash": d.read_token_hash[:8] if d.read_token_hash else "",
+            "created_at": d.created_at,
+            "updated_at": d.updated_at,
+        })
+
+    dashboards_summary = {
+        "total_dashboards": len(dashboards_list),
+    }
+
+    # ------------------------------------------------------------------
     # Render
     # ------------------------------------------------------------------
     return templates.TemplateResponse(
@@ -601,8 +642,106 @@ async def tenant_dashboard(
             "datasets": datasets_list,
             "datasets_summary": datasets_summary,
             "scheduled_workflows": scheduled_workflows_list,
+            "dashboards": dashboards_list,
+            "dashboards_summary": dashboards_summary,
         },
     )
+
+
+
+@router.get("/console/{tenant_id}/dashboards/{dashboard_id}", response_class=HTMLResponse)
+async def view_dashboard(
+    request: Request,
+    tenant_id: str,
+    dashboard_id: str,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a dashboard view (authenticated)."""
+    try:
+        tenant, db = await _authenticate_console(request, token=token, db=db, allow_redirect=True)
+    except _AuthFailRedirect:
+        return RedirectResponse(url=_LOGIN_URL, status_code=302)
+
+    if tenant.id != tenant_id:
+        raise HTTPException(status_code=403, detail="Tenant mismatch")
+
+    result = await db.execute(
+        select(DashboardModel).where(
+            DashboardModel.id == dashboard_id,
+            DashboardModel.tenant_id == tenant.id,
+        )
+    )
+    dashboard = result.scalar_one_or_none()
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    ds_name = "Unknown"
+    rows = []
+    if dashboard.dataset_id:
+        ds_result = await db.execute(select(Dataset).where(Dataset.id == dashboard.dataset_id))
+        dataset = ds_result.scalar_one_or_none()
+        if dataset:
+            ds_name = dataset.name
+            rows_result = await db.execute(
+                select(DatasetRow).where(DatasetRow.dataset_id == dataset.id).order_by(DatasetRow.created_at.desc()).limit(500)
+            )
+            rows = [r.data for r in rows_result.scalars().all()]
+
+    html = render_dashboard_html(
+        dashboard_name=dashboard.name,
+        dataset_name=ds_name,
+        config=dashboard.config or {},
+        rows=rows,
+        back_url=f"/console/{tenant_id}?tab=dashboards",
+    )
+    return HTMLResponse(content=html)
+
+
+@router.get("/d/{read_token}", response_class=HTMLResponse)
+async def public_dashboard(
+    read_token: str,
+    password: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """Render a public/shareable dashboard (no auth required)."""
+    import hashlib
+    token_hash = hashlib.sha256(read_token.encode()).hexdigest()
+
+    result = await db.execute(
+        select(DashboardModel).where(DashboardModel.read_token_hash == token_hash)
+    )
+    dashboard = result.scalar_one_or_none()
+    if dashboard is None:
+        raise HTTPException(status_code=404, detail="Dashboard not found")
+
+    if dashboard.password_hash:
+        if not password:
+            return HTMLResponse(content=render_password_page(dashboard.name, read_token))
+        if not verify_password(dashboard.password_hash, password):
+            return HTMLResponse(content=render_password_page(dashboard.name, read_token))
+
+    await set_tenant_context(db, dashboard.tenant_id)
+
+    ds_name = "Unknown"
+    rows = []
+    if dashboard.dataset_id:
+        ds_result = await db.execute(select(Dataset).where(Dataset.id == dashboard.dataset_id))
+        dataset = ds_result.scalar_one_or_none()
+        if dataset:
+            ds_name = dataset.name
+            rows_result = await db.execute(
+                select(DatasetRow).where(DatasetRow.dataset_id == dataset.id).order_by(DatasetRow.created_at.desc()).limit(500)
+            )
+            rows = [r.data for r in rows_result.scalars().all()]
+
+    html = render_dashboard_html(
+        dashboard_name=dashboard.name,
+        dataset_name=ds_name,
+        config=dashboard.config or {},
+        rows=rows,
+    )
+    return HTMLResponse(content=html)
 
 
 def _has_platform_key(provider: str) -> bool:

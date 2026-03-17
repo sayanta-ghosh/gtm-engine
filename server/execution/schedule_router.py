@@ -127,3 +127,33 @@ async def list_schedules(
             for sw in schedules
         ],
     }
+
+
+class UpdateScheduleRequest(BaseModel):
+    enabled: bool | None = None
+
+
+@router.patch("/{schedule_id}")
+async def update_schedule(
+    schedule_id: str,
+    body: UpdateScheduleRequest,
+    request: Request,
+    token: Optional[str] = Query(None),
+    db: AsyncSession = Depends(get_db),
+) -> dict:
+    """Update a scheduled workflow (enable/disable)."""
+    tenant, db = await _get_tenant(request, token=token, db=db)
+    result = await db.execute(
+        select(ScheduledWorkflow).where(
+            ScheduledWorkflow.id == schedule_id,
+            ScheduledWorkflow.tenant_id == tenant.id,
+        )
+    )
+    schedule = result.scalar_one_or_none()
+    if schedule is None:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+    if body.enabled is not None:
+        schedule.enabled = body.enabled
+    await db.commit()
+    await db.refresh(schedule)
+    return {"status": "ok", "enabled": schedule.enabled}

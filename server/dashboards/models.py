@@ -3,7 +3,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import DateTime, Integer, Text, UniqueConstraint, func
+from sqlalchemy import DateTime, ForeignKey, Integer, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -23,7 +23,14 @@ class Dashboard(Base):
     )
     tenant_id: Mapped[str] = mapped_column(Text, nullable=False, index=True)
     name: Mapped[str] = mapped_column(Text, nullable=False)
-    s3_path: Mapped[str] = mapped_column(Text, nullable=False)
+    s3_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    dataset_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("datasets.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    config: Mapped[dict | None] = mapped_column(JSONB, server_default="{}")
     data_queries: Mapped[dict | None] = mapped_column(JSONB)
     read_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
     refresh_interval: Mapped[int] = mapped_column(Integer, server_default="3600")

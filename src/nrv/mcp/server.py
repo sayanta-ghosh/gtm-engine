@@ -487,6 +487,34 @@ TOOLS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "nrv_estimate_cost",
+        "description": (
+            "Estimate credit cost for an operation before executing it. "
+            "Returns estimated credits, dollar equivalent, and whether BYOK keys "
+            "would make it free. Call this before large batch operations to show "
+            "the user what they will spend."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "operation": {
+                    "type": "string",
+                    "description": "The operation type to estimate",
+                    "enum": [
+                        "enrich_person", "enrich_company", "search_people",
+                        "search_web", "scrape_page", "google_search",
+                    ],
+                },
+                "count": {
+                    "type": "integer",
+                    "description": "Number of records/URLs to process",
+                    "default": 1,
+                },
+            },
+            "required": ["operation"],
+        },
+    },
     # ---- Account ----
     {
         "name": "nrv_credit_balance",
@@ -1162,6 +1190,58 @@ def _handle_nrv_search_people(args: dict[str, Any]) -> dict[str, Any]:
     return _api_request("POST", "/execute", json_body=body)
 
 
+async def _handle_nrv_estimate_cost(arguments: dict) -> list[dict]:
+    """Estimate credit cost for an operation."""
+    operation = arguments.get("operation", "")
+    count = arguments.get("count", 1)
+
+    CREDIT_COST = 1
+    CREDIT_TO_USD = 0.08
+
+    OP_PROVIDERS = {
+        "enrich_person": "apollo",
+        "enrich_company": "apollo",
+        "search_people": "apollo",
+        "search_web": "rapidapi",
+        "scrape_page": "parallel",
+        "google_search": "rapidapi",
+    }
+
+    estimated_credits = CREDIT_COST * count
+    estimated_usd = estimated_credits * CREDIT_TO_USD
+    provider = OP_PROVIDERS.get(operation, "unknown")
+
+    # Check if user has BYOK for this provider
+    byok = False
+    try:
+        keys_resp = _api_request("GET", "/keys")
+        if isinstance(keys_resp, list) and len(keys_resp) > 0:
+            text_content = keys_resp[0].get("text", "")
+            import json as _json
+            keys_data = _json.loads(text_content)
+            for key_info in keys_data.get("keys", []):
+                if key_info.get("provider") == provider and key_info.get("source") == "byok":
+                    byok = True
+                    break
+    except Exception:
+        pass
+
+    result = {
+        "operation": operation,
+        "count": count,
+        "provider": provider,
+        "byok": byok,
+        "estimated_credits": 0 if byok else estimated_credits,
+        "estimated_usd": 0.0 if byok else round(estimated_usd, 2),
+        "note": (
+            f"Free — using your own {provider} API key"
+            if byok
+            else f"{estimated_credits} credits (~${estimated_usd:.2f})"
+        ),
+    }
+    return [{"type": "text", "text": json.dumps(result, indent=2)}]
+
+
 # Handler dispatch table
 TOOL_HANDLERS: dict[str, Any] = {
     "nrv_search_web": _handle_nrv_search_web,
@@ -1185,6 +1265,7 @@ TOOL_HANDLERS: dict[str, Any] = {
     "nrv_health": _handle_nrv_health,
     "nrv_new_workflow": _handle_nrv_new_workflow,
     "nrv_search_people": _handle_nrv_search_people,
+    "nrv_estimate_cost": _handle_nrv_estimate_cost,
 }
 
 
