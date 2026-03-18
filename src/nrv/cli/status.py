@@ -119,18 +119,52 @@ def status() -> None:
         lines.append("")
         lines.append("[dim]No BYOK keys configured. Run: nrv keys add <provider>[/dim]")
 
-    # ---- Available providers ----
+    # ---- Available providers (from vendor catalog) ----
     lines.append("")
-    providers_info = [
-        ("apollo", "Enrich + Search people/companies"),
-        ("rocketreach", "Enrich + Search with school/alumni filters"),
-        ("predictleads", "Company jobs, news, similar companies"),
-    ]
+    providers_by_category = {
+        "Enrichment": [
+            ("apollo", "Enrich + Search people/companies"),
+            ("rocketreach", "Enrich + Search with alumni filters"),
+            ("bettercontact", "Waterfall enrichment (email + phone)"),
+            ("hunter", "Email finding + verification"),
+            ("clearbit", "Company enrichment + reveal"),
+            ("lusha", "B2B contact enrichment"),
+        ],
+        "Verification": [
+            ("zerobounce", "Email verification + catch-all detection"),
+        ],
+        "Search & Scraping": [
+            ("rapidapi", "Google SERP search"),
+            ("parallel", "Web scraping (anti-bot capable)"),
+        ],
+        "Signals": [
+            ("predictleads", "Company jobs, tech, funding signals"),
+        ],
+        "Outreach": [
+            ("instantly", "Email campaigns + warmup"),
+            ("lemlist", "Multi-channel outreach"),
+        ],
+        "LLM / AI Research": [
+            ("openai", "GPT models for research & analysis"),
+            ("anthropic", "Claude models for research & analysis"),
+            ("perplexity", "AI-powered web research"),
+        ],
+    }
+    # Which providers have actual backend integration
+    integrated = {"apollo", "rocketreach", "predictleads", "parallel", "rapidapi"}
+
     lines.append("[bold]Available Providers:[/bold]")
-    for prov, desc in providers_info:
-        has_key = any(k.get("provider") == prov for k in keys_data)
-        key_badge = "[green]BYOK[/green]" if has_key else "[dim]platform[/dim]"
-        lines.append(f"  [cyan]{prov:15}[/cyan] {key_badge}  {desc}")
+    for category, provs in providers_by_category.items():
+        lines.append(f"  [bold dim]{category}[/bold dim]")
+        for prov, desc in provs:
+            has_key = any(k.get("provider") == prov for k in keys_data)
+            if has_key:
+                badge = "[green]BYOK[/green]"
+            elif prov in integrated:
+                badge = "[dim]platform[/dim]"
+            else:
+                badge = "[yellow]BYOK only[/yellow]"
+            lines.append(f"    [cyan]{prov:16}[/cyan] {badge}  {desc}")
 
     # ---- Quick start hints ----
     lines.append("")

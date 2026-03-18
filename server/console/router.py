@@ -152,7 +152,7 @@ INTEGRATION_CATALOG = {
 }
 
 # Known enrichment providers that may have platform keys
-from server.core.vendor_catalog import VENDOR_CATALOG, VENDOR_CATEGORIES, get_vendors_by_category
+from server.core.vendor_catalog import VENDOR_CATALOG, VENDOR_CATEGORIES, INTEGRATED_PROVIDERS, get_vendors_by_category
 
 # Legacy list kept for backward compat; new code uses VENDOR_CATALOG
 ENRICHMENT_PROVIDERS = list(VENDOR_CATALOG.keys())
@@ -335,6 +335,10 @@ async def tenant_dashboard(
             prov_status = "available"
             fingerprint = "-"
             platform_count += 1
+        elif prov_name not in INTEGRATED_PROVIDERS:
+            using = "coming_soon"
+            prov_status = "coming_soon"
+            fingerprint = "-"
         else:
             using = "none"
             prov_status = "unavailable"

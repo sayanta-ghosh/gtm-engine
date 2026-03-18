@@ -1373,16 +1373,17 @@
                     container.innerHTML = '<div style="color:#888;font-size:12px;padding:16px;">Loading...</div>';
                     const token = new URLSearchParams(window.location.search).get('token');
                     const headers = token ? {'Authorization': 'Bearer ' + token} : {};
-                    fetch('/api/v1/datasets/' + slug + '?limit=500', { headers })
+                    fetch('/api/v1/datasets/' + slug + '?limit=500', { headers: headers, credentials: 'same-origin' })
                     .then(r => r.json())
                     .then(data => {
+                        const skipKeys = new Set(['id','dataset_id','tenant_id','_created_at','_workflow_id','_updated_at','dedup_hash','workflow_id','created_at','updated_at']);
                         const rows = (data.rows || []).map(r => {
-                            // Rows: {id, dataset_id, data: {...}, dedup_hash, ...}
-                            const d = (r && typeof r === 'object' && r.data && typeof r.data === 'object') ? r.data : r;
+                            if (!r || typeof r !== 'object') return {};
+                            // Rows may be flat {id, url, score, ...} or nested {data: {url, score}}
+                            const src = (r.data && typeof r.data === 'object' && !Array.isArray(r.data)) ? r.data : r;
                             const clean = {};
-                            Object.keys(d).forEach(k => {
-                                if (!['id','dataset_id','tenant_id','_created_at','_workflow_id','_updated_at','dedup_hash','workflow_id','created_at','updated_at'].includes(k))
-                                    clean[k] = d[k];
+                            Object.keys(src).forEach(k => {
+                                if (!skipKeys.has(k)) clean[k] = src[k];
                             });
                             return clean;
                         });

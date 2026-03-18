@@ -170,6 +170,16 @@ VENDOR_CATEGORIES = {
 }
 
 
+
+# Vendors with actual server-side execution handlers
+INTEGRATED_PROVIDERS = {"apollo", "rocketreach", "predictleads", "parallel", "rapidapi"}
+
+# All others are BYOK-only with skill files but no server-side handler yet
+# They appear in the catalog as "Coming Soon" in the dashboard
+COMING_SOON_PROVIDERS = {
+    k for k in VENDOR_CATALOG if k not in INTEGRATED_PROVIDERS
+}
+
 def get_credit_cost(operation: str) -> int:
     """Get the credit cost for an operation. Returns 0 for BYOK-only operations."""
     for vendor in VENDOR_CATALOG.values():

@@ -17,89 +17,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from server.auth.models import Tenant
 from server.core.config import settings
 from server.core.database import get_db, set_tenant_context
+from server.auth.flexible import get_tenant_flexible as _get_tenant_flexible
 from server.data import dataset_service as svc
 
 router = APIRouter(prefix="/api/v1/datasets", tags=["datasets"])
-
-_COOKIE_NAME = "nrv_session"
-
-
-# ---------------------------------------------------------------------------
-# Flexible auth — accepts Bearer, cookie, or query param
-# ---------------------------------------------------------------------------
-
-
-async def _get_tenant_flexible(
-    request: Request,
-    token: Optional[str] = Query(None),
-    db: AsyncSession = Depends(get_db),
-) -> tuple[Tenant, AsyncSession]:
-    """Authenticate via Bearer token, session cookie, or query param.
-
-    Supports both MCP client (Bearer) and dashboard (cookie) callers.
-    """
-    jwt_token: str | None = None
-
-    # 1. Authorization header (MCP client / API)
-    auth_header = request.headers.get("authorization", "")
-    if auth_header.startswith("Bearer "):
-        jwt_token = auth_header.removeprefix("Bearer ")
-
-    # 2. Cookie (dashboard browser sessions)
-    if not jwt_token:
-        jwt_token = request.cookies.get(_COOKIE_NAME)
-
-    # 3. Query param (legacy)
-    if not jwt_token and token:
-        jwt_token = token
-
-    # 4. App token (hosted apps — scoped to specific datasets)
-    app_token = request.query_params.get("app_token")
-    if not jwt_token and app_token:
-        from server.apps.service import get_app_by_token
-        app = await get_app_by_token(db, app_token)
-        if app:
-            result = await db.execute(select(Tenant).where(Tenant.id == app.tenant_id))
-            tenant = result.scalar_one_or_none()
-            if tenant:
-                await set_tenant_context(db, tenant.id)
-                return tenant, db
-
-    if not jwt_token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required",
-        )
-
-    try:
-        payload = jwt.decode(
-            jwt_token,
-            settings.JWT_SECRET_KEY,
-            algorithms=[settings.JWT_ALGORITHM],
-        )
-    except JWTError:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session expired. Please sign in again.",
-        )
-
-    tenant_id: str | None = payload.get("tenant_id")
-    if not tenant_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid token: missing tenant_id",
-        )
-
-    result = await db.execute(select(Tenant).where(Tenant.id == tenant_id))
-    tenant = result.scalar_one_or_none()
-    if tenant is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Tenant not found",
-        )
-
-    await set_tenant_context(db, tenant.id)
-    return tenant, db
 
 
 # ---------------------------------------------------------------------------
