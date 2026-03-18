@@ -26,6 +26,17 @@ Use this guide BEFORE making any API call to pick the optimal provider.
 | AI-powered web research | **Parallel Web** | search_web | Natural language objectives, agentic mode |
 | Extract structured data from pages | **Parallel Web** | extract_structured | Task API with LLM + citations |
 | Bulk web extraction (100+ URLs) | **Parallel Web** | batch_extract | Task Groups, up to 2K req/min |
+| Waterfall enrich emails (max coverage) | **BetterContact** | enrich_person | Tries 20+ providers, only charges for found data |
+| Waterfall enrich phone numbers | **BetterContact** | enrich_person | 10 credits/phone but 70-85% coverage |
+| Find emails at a domain | **Hunter** | domain_search | Returns all known emails + confidence scores |
+| Find one email from name+domain | **Hunter** | email_finder | Pattern-based guess with confidence score |
+| Verify an email before sending | **ZeroBounce** | validate_email | 99.6% accuracy, catch-all detection, sub-statuses |
+| Validate email list in bulk | **ZeroBounce** | batch_validate | File upload for 200+, credits never expire |
+| Detect disposable/spam emails | **ZeroBounce** | validate_email | `do_not_mail` status with disposable/toxic sub-types |
+| Create cold email campaign | **Instantly** | create_campaign | Full sequence builder, A/B testing, scheduling |
+| Manage campaign leads | **Instantly** | manage_leads | Add, move, list leads across campaigns |
+| Monitor email warmup | **Instantly** | warmup_analytics | Track warmup progress before launching |
+| Get campaign analytics | **Instantly** | campaign_analytics | Opens, replies, bounces per campaign |
 
 ## Provider Deep-Dive: Strengths & Weaknesses
 
@@ -99,6 +110,67 @@ Use this guide BEFORE making any API call to pick the optimal provider.
 - Leadership: `"{company}" "appointed" OR "new hire" OR "joins as"`
 - LinkedIn: `site:linkedin.com/in "{name}" "{company}"`
 
+### BetterContact (provider: `bettercontact`)
+**Best for:** Maximum email/phone coverage via waterfall enrichment (20+ providers)
+**Strengths:**
+- Cascades through 20+ data providers automatically (Apollo, RocketReach, Hunter, etc.)
+- Only charges for found + verified data (no credits for misses)
+- 87-95% email coverage vs 60-70% from a single provider
+- Built-in email verification (Bouncer) and catch-all validation
+- Phone number coverage 70-85% (vs ~40% from single providers)
+**Weaknesses:**
+- Async API — must poll for results or use webhooks (adds latency)
+- Phone enrichment costs 10x email (10 credits vs 1)
+- Cannot specify which underlying provider to use
+- No company-only enrichment (people data only)
+- Batch limit: 100 per request
+
+### Hunter (provider: `hunter`)
+**Best for:** Email discovery by domain, email verification, email pattern detection
+**Strengths:**
+- Domain Search finds ALL known emails at a company (up to 100)
+- Email Finder generates likely email from name+domain with confidence score
+- Email Verifier checks deliverability with specific status codes
+- Free Email Count endpoint (no credits) — check coverage before spending
+- Sources tracking shows WHERE emails were found
+**Weaknesses:**
+- No phone numbers at all
+- No people search by title/seniority (different tool category than Apollo)
+- Free tier extremely limited (25 searches/month)
+- Email Finder is pattern-based guessing, not verified contacts
+- Confidence scores below 70 are unreliable
+
+### ZeroBounce (provider: `zerobounce`)
+**Best for:** Email validation before campaigns — deliverability verification with detailed status codes
+**Strengths:**
+- 99.6% validation accuracy with detailed status + sub_status
+- Catch-all detection distinguishes accept_all (safer) vs catch-all (risky)
+- Disposable, spam trap, and toxic email detection
+- Credits never expire — buy once, use anytime
+- No credit consumed for unknown results (server timeouts)
+- Regional endpoints (US/EU) for GDPR compliance
+**Weaknesses:**
+- Validation only — cannot find or enrich emails
+- Single validation response time 1-30 seconds (varies by mail server)
+- Batch endpoint limited to 200 emails, 5 requests/minute
+- No phone validation
+
+### Instantly (provider: `instantly`)
+**Best for:** Cold email campaign creation, sending, warmup, and analytics
+**Strengths:**
+- Full campaign lifecycle via API (create, activate, pause, analytics)
+- Unlimited email account connections with built-in warmup
+- Lead management with campaign assignment and movement
+- A/B testing and sequence building
+- 6,000 req/min rate limit (generous)
+**Weaknesses:**
+- API access requires Hypergrowth plan ($97/mo) or above — Growth plan has NO API
+- V2 only — V1 is deprecated and incompatible
+- Lead listing uses POST (not GET) — non-standard REST
+- Sequences array quirk: only first element is used despite being an array
+- Warmup must run 30+ days before campaign launch
+- Hard caps on monthly emails (no overage billing, just pauses sending)
+
 ### Parallel Web (provider: `parallel_web`)
 **Best for:** Web scraping, content extraction, AI-powered web research at scale
 **Strengths:**
@@ -159,6 +231,30 @@ PredictLeads company_news (new funding, expansion, product launch)
   → Apollo enrich_person (get contact info)
 ```
 
+### 6. Full Outbound Pipeline (Enrichment → Validation → Campaign)
+```
+Apollo search_people (find ICP matches by title + company)
+  → BetterContact enrich_person (waterfall for max email coverage)
+  → ZeroBounce validate_email (verify all emails, remove invalid/disposable/spamtrap)
+  → Instantly create_campaign (load verified leads, set sequences, activate)
+```
+
+### 7. Domain Email Discovery + Verification
+```
+Hunter domain_search (find all emails at target domain)
+  → ZeroBounce batch_validate (verify deliverability of all found emails)
+  → Filter to valid + accept_all only
+```
+
+### 8. Signal-Triggered Outbound Campaign
+```
+PredictLeads company_news (detect funding, expansion, product launch)
+  → Apollo search_people (find decision makers)
+  → BetterContact enrich_person (waterfall for best email coverage)
+  → ZeroBounce validate_email (verify before sending)
+  → Instantly create_campaign (personalized trigger-based outreach)
+```
+
 ## Auto-Selection Rules
 
 The CLI and execution engine follow these rules:
@@ -167,8 +263,12 @@ The CLI and execution engine follow these rules:
 2. **If operation starts with `company_`** → auto-select PredictLeads
 3. **If operation is `search_web`** → auto-select RapidAPI Google
 4. **If operation is `scrape_page`, `crawl_site`, `extract_structured`, `batch_extract`** → auto-select Parallel Web
-5. **Everything else (enrich, search people/companies)** → default to Apollo
-6. **User can always override** with `--provider` flag
+5. **If operation is `validate_email` or `batch_validate`** → auto-select ZeroBounce
+6. **If operation is `domain_search` or `email_finder`** → auto-select Hunter
+7. **If operation is `create_campaign`, `manage_leads`, or `campaign_analytics`** → auto-select Instantly
+8. **If `--waterfall` flag is used or max coverage is requested** → auto-select BetterContact for enrichment
+9. **Everything else (enrich, search people/companies)** → default to Apollo
+10. **User can always override** with `--provider` flag
 
 Note: Parallel Web also supports `search_web` (AI-powered objective search).
 Use `--provider parallel_web` to get Parallel's agentic search instead of Google.

@@ -53,6 +53,18 @@ async def _get_tenant_flexible(
     if not jwt_token and token:
         jwt_token = token
 
+    # 4. App token (hosted apps — scoped to specific datasets)
+    app_token = request.query_params.get("app_token")
+    if not jwt_token and app_token:
+        from server.apps.service import get_app_by_token
+        app = await get_app_by_token(db, app_token)
+        if app:
+            result = await db.execute(select(Tenant).where(Tenant.id == app.tenant_id))
+            tenant = result.scalar_one_or_none()
+            if tenant:
+                await set_tenant_context(db, tenant.id)
+                return tenant, db
+
     if not jwt_token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

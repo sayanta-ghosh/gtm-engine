@@ -799,6 +799,44 @@ TOOLS: list[dict[str, Any]] = [
             "required": [],
         },
     },
+    {
+        "name": "nrv_deploy_app",
+        "description": (
+            "Deploy a static HTML/CSS/JS app hosted on nrv, backed by persistent datasets. "
+            "The app is served on a public URL and can CRUD its connected datasets "
+            "using the auto-injected window.NRV_APP_TOKEN and window.NRV_DATASETS_URL. "
+            "Pass all files as a dict of {path: content}. The entry_point HTML file "
+            "gets NRV context variables injected automatically."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "App name (used to generate the slug)",
+                },
+                "files": {
+                    "type": "object",
+                    "description": (
+                        "Dict of {file_path: file_content}. "
+                        "Example: {'index.html': '<html>...', 'style.css': '...', 'app.js': '...'}"
+                    ),
+                },
+                "dataset_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of dataset IDs this app can read/write. Use nrv_list_datasets to find IDs.",
+                },
+                "entry_point": {
+                    "type": "string",
+                    "description": "Main HTML file to serve (default: index.html)",
+                    "default": "index.html",
+                },
+            },
+            "required": ["name", "files", "dataset_ids"],
+        },
+    },
+
 ]
 
 
@@ -1373,6 +1411,32 @@ def _auto_generate_label(tool_name: str, args: dict) -> str:
     return tool_name.replace("nrv_", "").replace("_", " ").title()[:50]
 
 
+
+def _handle_nrv_deploy_app(arguments: dict) -> dict:
+    """Deploy a static app to nrv hosting."""
+    name = arguments.get("name", "")
+    files = arguments.get("files", {})
+    dataset_ids = arguments.get("dataset_ids", [])
+    entry_point = arguments.get("entry_point", "index.html")
+
+    if not name:
+        return {"error": "name is required"}
+    if not files:
+        return {"error": "files dict is required (at least one HTML file)"}
+    if entry_point not in files:
+        return {"error": f"entry_point '{entry_point}' not found in files dict"}
+    if not dataset_ids:
+        return {"error": "At least one dataset_id is required"}
+
+    body = {
+        "name": name,
+        "files": files,
+        "dataset_ids": dataset_ids,
+        "entry_point": entry_point,
+    }
+    return _api_request("POST", "/apps", json=body)
+
+
 TOOL_HANDLERS: dict[str, Any] = {
     "nrv_search_web": _handle_nrv_search_web,
     "nrv_scrape_page": _handle_nrv_scrape_page,
@@ -1397,6 +1461,7 @@ TOOL_HANDLERS: dict[str, Any] = {
     "nrv_search_people": _handle_nrv_search_people,
     "nrv_estimate_cost": _handle_nrv_estimate_cost,
     "nrv_get_run_log": _handle_nrv_get_run_log,
+    "nrv_deploy_app": _handle_nrv_deploy_app,
 }
 
 

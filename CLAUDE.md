@@ -63,7 +63,7 @@ nrv auth login
 nrv enrich person --email test@example.com
 ```
 
-## MCP Tools (23 tools)
+## MCP Tools (24 tools)
 
 | Tool | What It Does |
 |------|-------------|
@@ -84,6 +84,7 @@ nrv enrich person --email test@example.com
 | `nrv_list_datasets` | List all persistent datasets |
 | `nrv_estimate_cost` | Estimate credit cost before executing (call before large batches) |
 | `nrv_get_run_log` | Read back workflow run logs with results and column metadata |
+| `nrv_deploy_app` | Deploy a static HTML/CSS/JS app backed by datasets |
 | `nrv_credit_balance` | Check credit balance and spend |
 | `nrv_provider_status` | Check provider availability |
 | `nrv_list_connections` | List active OAuth connections |
@@ -182,6 +183,7 @@ psql -U nrv -d nrv -f migrations/004_run_logs.sql
 psql -U nrv -d nrv -f migrations/005_datasets.sql
 psql -U nrv -d nrv -f migrations/006_scheduled_workflows.sql
 psql -U nrv -d nrv -f migrations/007_dashboard_datasets.sql
+psql -U nrv -d nrv -f migrations/008_hosted_apps.sql
 ```
 
 All tables use RLS with tenant isolation. The `nrv_api` role has appropriate grants.
@@ -206,7 +208,16 @@ Dashboards are server-rendered HTML from dataset data + widget config. No S3 dep
 - **Widgets**: `table` (data table), `metric` (count/sum/avg aggregation)
 - Token-based access: `read_token` generated on creation, shareable without auth
 
-### CLI Commands (17 command groups)
+### Hosted Apps
+
+Users build HTML/CSS/JS apps in Claude Code using datasets as DBs, then deploy to nrv:
+
+- **Deploy**: `nrv_deploy_app(name, files, dataset_ids)` MCP tool
+- **Serve**: `/apps/{app_token}/` — public URL, no auth for the shell
+- **CRUD**: App JS gets `window.NRV_APP_TOKEN` + `window.NRV_DATASETS_URL` injected for data access
+- **Scoped**: App tokens can only access their connected datasets
+
+### CLI Commands (18 command groups)
 
 | Command | What It Does |
 |---------|-------------|

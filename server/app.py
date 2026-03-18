@@ -97,6 +97,7 @@ from server.execution.runs_router import router as runs_router  # noqa: E402
 from server.execution.schedule_router import router as schedules_router  # noqa: E402
 from server.feedback.router import router as feedback_router  # noqa: E402
 from server.vault.router import router as keys_router  # noqa: E402
+from server.apps.router import router as apps_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(execute_router)
@@ -108,6 +109,7 @@ app.include_router(dashboards_router)
 app.include_router(datasets_router)
 app.include_router(schedules_router)
 app.include_router(feedback_router)
+app.include_router(apps_router)
 app.include_router(console_router)
 
 # ---------------------------------------------------------------------------
