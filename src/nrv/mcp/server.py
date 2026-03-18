@@ -275,7 +275,7 @@ TOOLS: list[dict[str, Any]] = [
                     ),
                 },
             },
-            "required": [],
+            "required": ["query"],
         },
     },
     # ---- Enrichment ----

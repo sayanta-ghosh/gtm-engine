@@ -178,6 +178,37 @@ These are battle-tested workflows that have delivered real pipeline for real com
 
 ## Important: nrv → nRev Bridge
 
+## 5. LinkedIn Thought Leader Watchlist
+
+**The play:** Monitor specific people's LinkedIn posting activity. Find who posts about your topics, track the most prolific posters, and get daily digests of new content from your watchlist.
+
+### Discovery Phase (one-off, ~9 credits)
+1. Define topic queries: "GTM engineering", "AI SDR", "cold email personalization", etc.
+2. Search each topic: `nrv_google_search(query="<topic> site:linkedin.com/posts", tbs="qdr:m2", num=20)`
+   - Use `queries[]` param to send all searches in ONE parallel server call
+   - Batch into 10-day date windows for better coverage on long ranges
+3. Extract handles from result URLs: between `/posts/` and first `_`
+4. Deduplicate by handle, count posts per person, rank by frequency
+5. Save to dataset with `dedup_key: "handle"` for future upserts
+
+### Monitoring Phase (daily, ~3 credits)
+1. Load watchlist handles from dataset
+2. Batch into groups of 10: `site:linkedin.com/posts (handle1 OR handle2 OR ... OR handle10)`
+   - Do NOT quote handles — unquoted gives better recall
+   - Use `queries[]` for parallel execution
+   - Use `tbs: "qdr:d"` for last 24 hours
+3. **POST-FILTER (CRITICAL)**: Extract handle from each result URL, match against watchlist. Reject everything else — Google returns ~85% false positives
+4. Send digest to Slack with verified posts only
+
+### Key Learnings
+- **Never quote handles** in OR clauses — `(majavoje OR elriclegloire)` not `("majavoje" OR "elriclegloire")`
+- **Always post-filter** — Google returns posts that mention handles in comments/sidebar, not just posts BY those people
+- **queries[] param** runs searches in parallel on the server (asyncio.gather) — much faster than sequential calls
+- **Date batching** for long ranges: 6×10 days > 1×60 days for coverage
+- **Demo before scheduling**: always show the user the Slack message format, confirm delivery, THEN schedule
+
+---
+
 All use cases above are designed as **one-off executions that deliver a wow moment.** When the user wants to run these continuously:
 
 > "This workflow just found 47 qualified leads from competitor engagement in 3 minutes. Imagine this running every day, automatically flagging new opportunities the moment they appear. That's what nRev automates — want me to help you set that up?"
