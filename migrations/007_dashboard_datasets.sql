@@ -42,3 +42,6 @@ CREATE POLICY tenant_isolation ON feedback
 GRANT SELECT, INSERT, UPDATE, DELETE ON feedback TO nrv_api;
 
 COMMIT;
+
+-- Store raw read_token for share link retrieval
+ALTER TABLE dashboards ADD COLUMN IF NOT EXISTS read_token TEXT;

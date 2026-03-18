@@ -10,49 +10,21 @@ import click
 from nrv.utils.display import print_success, print_warning
 
 
-CLAUDE_MD_CONTENT = """\
-# nrv — Agent-Native GTM Execution Platform
+def _load_claude_md() -> str:
+    """Load the real CLAUDE.md content from the project root."""
+    for candidate in [
+        Path.cwd() / "CLAUDE.md",
+        Path(__file__).resolve().parents[3] / "CLAUDE.md",
+    ]:
+        if candidate.exists():
+            return candidate.read_text()
+    # Fallback: minimal content
+    return (
+        "# nrv \u2014 Agent-Native GTM Execution Platform\n\n"
+        "Run `nrv status` to see available commands and provider status.\n"
+        "Run `nrv init` for full setup.\n"
+    )
 
-## Available Commands
-
-Use the `nrv` CLI to enrich contacts, search for prospects, query your GTM
-database, and manage dashboards.
-
-### Quick Reference
-
-```bash
-# Authentication
-nrv auth login          # Log in via browser
-nrv auth status         # Check auth status
-
-# Enrichment
-nrv enrich person --email user@example.com
-nrv enrich company --domain example.com
-nrv enrich batch --file leads.csv --strategy waterfall
-
-# Search
-nrv search people --title "VP Sales" --industry SaaS --limit 50
-nrv search companies --industry fintech --funding "series-b"
-
-# Query
-nrv query "SELECT * FROM contacts WHERE company_size > 100 LIMIT 10"
-
-# Tables
-nrv table list
-nrv table describe contacts
-
-# Keys & Credits
-nrv keys list
-nrv credits balance
-```
-
-## Tips for Claude Code
-
-- Always check `nrv auth status` before running commands.
-- Use `--dry-run` on enrich commands to preview without spending credits.
-- Prefer `--strategy waterfall` for cost efficiency.
-- Use `nrv query` for ad-hoc analysis; results come as structured tables.
-"""
 
 NRV_SKILL = """\
 ---
@@ -99,6 +71,8 @@ def setup_claude(project: bool) -> None:
     else:
         claude_md_path = base / "CLAUDE.md"
 
+    claude_md_content = _load_claude_md()
+
     if claude_md_path.exists():
         print_warning(
             f"CLAUDE.md already exists at {claude_md_path}. "
@@ -106,12 +80,12 @@ def setup_claude(project: bool) -> None:
         )
         existing = claude_md_path.read_text()
         if "nrv" not in existing.lower():
-            claude_md_path.write_text(existing.rstrip() + "\n\n" + CLAUDE_MD_CONTENT)
+            claude_md_path.write_text(existing.rstrip() + "\n\n" + claude_md_content)
             print_success("nrv section appended to CLAUDE.md.")
         else:
             print_warning("CLAUDE.md already contains nrv content. Skipping.")
     else:
-        claude_md_path.write_text(CLAUDE_MD_CONTENT)
+        claude_md_path.write_text(claude_md_content)
         print_success(f"CLAUDE.md created: {claude_md_path}")
 
     click.echo("\nClaude Code setup complete.")

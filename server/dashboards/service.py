@@ -252,7 +252,7 @@ def render_password_page(dashboard_name: str, token: str) -> str:
 <div class="db-password-form">
     <h2>{_esc(dashboard_name)}</h2>
     <p>This dashboard is password-protected.</p>
-    <form method="GET" action="/d/{_esc(token)}">
+    <form method="POST" action="/d/{_esc(token)}">
         <input type="password" name="password" placeholder="Enter password" autofocus>
         <button type="submit">View Dashboard</button>
     </form>

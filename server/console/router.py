@@ -609,6 +609,7 @@ async def tenant_dashboard(
             "dataset_name": dash_ds_names.get(str(d.dataset_id), "—") if d.dataset_id else "—",
             "widget_count": len(widgets),
             "read_token_hash": d.read_token_hash[:8] if d.read_token_hash else "",
+            "read_token": d.read_token or "",
             "created_at": d.created_at,
             "updated_at": d.updated_at,
         })
@@ -698,8 +699,9 @@ async def view_dashboard(
     return HTMLResponse(content=html)
 
 
-@router.get("/d/{read_token}", response_class=HTMLResponse)
+@router.api_route("/d/{read_token}", methods=["GET", "POST"], response_class=HTMLResponse)
 async def public_dashboard(
+    request: Request,
     read_token: str,
     password: Optional[str] = Query(None),
     db: AsyncSession = Depends(get_db),
@@ -715,10 +717,16 @@ async def public_dashboard(
     if dashboard is None:
         raise HTTPException(status_code=404, detail="Dashboard not found")
 
+    # Accept password from query param (GET) or form body (POST)
+    pwd = password
+    if not pwd and request.method == "POST":
+        form = await request.form()
+        pwd = form.get("password")
+
     if dashboard.password_hash:
-        if not password:
+        if not pwd:
             return HTMLResponse(content=render_password_page(dashboard.name, read_token))
-        if not verify_password(dashboard.password_hash, password):
+        if not verify_password(dashboard.password_hash, pwd):
             return HTMLResponse(content=render_password_page(dashboard.name, read_token))
 
     await set_tenant_context(db, dashboard.tenant_id)

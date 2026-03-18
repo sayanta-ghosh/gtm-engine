@@ -6,7 +6,7 @@ Handles the complete setup flow:
 3. Verify everything works
 
 After `nrv init`, every new Claude Code session automatically has access
-to all 15 nrv tools.
+to all 22 nrv tools.
 """
 
 from __future__ import annotations

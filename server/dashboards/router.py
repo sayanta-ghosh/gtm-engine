@@ -194,6 +194,7 @@ async def create_dashboard(
         s3_path=None,
         data_queries=None,
         read_token_hash=token_hash,
+        read_token=raw_token,
         refresh_interval=body.refresh_interval,
         password_hash=pwd_hash,
     )

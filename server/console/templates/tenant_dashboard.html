@@ -927,6 +927,7 @@
                             </div>
                         </div>
                         <div style="display:flex;gap:6px;">
+                            {% if db.read_token %}<button onclick="copyShareLink('{{ db.read_token }}')" style="padding:6px 12px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;color:#10b981;font-size:12px;cursor:pointer;" title="Copy public share link">Share</button>{% endif %}
                             <a href="/console/{{ tenant_id }}/dashboards/{{ db.id }}" style="padding:6px 12px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;color:#818cf8;font-size:12px;text-decoration:none;">View</a>
                             <button onclick="deleteDashboard('{{ db.id }}')" style="padding:6px 12px;background:#1a1a2e;border:1px solid #2a2a3e;border-radius:6px;color:#ef4444;font-size:12px;cursor:pointer;">Delete</button>
                         </div>
@@ -1333,7 +1334,7 @@
                 btn.innerHTML = 'Hide Data &#x25B2;';
                 if (!_dsLoaded[slug]) {
                     _dsLoaded[slug] = true;
-                    fetch('/api/v1/datasets/' + slug + '?limit=20', {
+                    fetch('/api/v1/datasets/' + slug + '/rows?limit=20', {
                         headers: getAuthHeaders()
                     })
                     .then(r => r.json())
@@ -1469,6 +1470,19 @@
                 window.location.reload();
             })
             .catch(function(e) { alert('Error: ' + e.message); });
+        }
+
+        function copyShareLink(token) {
+            const url = window.location.origin + '/d/' + token;
+            navigator.clipboard.writeText(url).then(() => {
+                const btn = event.target;
+                const orig = btn.textContent;
+                btn.textContent = 'Copied!';
+                btn.style.color = '#10b981';
+                setTimeout(() => { btn.textContent = orig; }, 2000);
+            }).catch(() => {
+                prompt('Share link:', window.location.origin + '/d/' + token);
+            });
         }
 
         function deleteDashboard(id) {

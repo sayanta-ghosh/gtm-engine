@@ -130,6 +130,27 @@ class NrvClient:
         return self._request("DELETE", path)
 
     # ------------------------------------------------------------------
+    # Public convenience methods (used by newer CLI commands)
+    # ------------------------------------------------------------------
+
+    def get(self, path: str, params: dict[str, Any] | None = None) -> Any:
+        """Public GET with optional params dict."""
+        cleaned = {k: v for k, v in (params or {}).items() if v is not None}
+        return self._request("GET", path, params=cleaned)
+
+    def post(self, path: str, json: Any = None) -> Any:
+        """Public POST with JSON body."""
+        return self._request("POST", path, json=json)
+
+    def patch(self, path: str, json: Any = None) -> Any:
+        """Public PATCH with JSON body."""
+        return self._request("PATCH", path, json=json)
+
+    def delete(self, path: str) -> Any:
+        """Public DELETE."""
+        return self._request("DELETE", path)
+
+    # ------------------------------------------------------------------
     # Enrich
     # ------------------------------------------------------------------
 

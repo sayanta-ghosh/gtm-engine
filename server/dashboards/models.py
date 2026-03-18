@@ -33,6 +33,7 @@ class Dashboard(Base):
     config: Mapped[dict | None] = mapped_column(JSONB, server_default="{}")
     data_queries: Mapped[dict | None] = mapped_column(JSONB)
     read_token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    read_token: Mapped[str | None] = mapped_column(Text, nullable=True)
     refresh_interval: Mapped[int] = mapped_column(Integer, server_default="3600")
     password_hash: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, server_default="active")

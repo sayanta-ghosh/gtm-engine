@@ -1190,7 +1190,7 @@ def _handle_nrv_search_people(args: dict[str, Any]) -> dict[str, Any]:
     return _api_request("POST", "/execute", json_body=body)
 
 
-async def _handle_nrv_estimate_cost(arguments: dict) -> list[dict]:
+def _handle_nrv_estimate_cost(arguments: dict) -> dict:
     """Estimate credit cost for an operation."""
     operation = arguments.get("operation", "")
     count = arguments.get("count", 1)
@@ -1215,18 +1215,15 @@ async def _handle_nrv_estimate_cost(arguments: dict) -> list[dict]:
     byok = False
     try:
         keys_resp = _api_request("GET", "/keys")
-        if isinstance(keys_resp, list) and len(keys_resp) > 0:
-            text_content = keys_resp[0].get("text", "")
-            import json as _json
-            keys_data = _json.loads(text_content)
-            for key_info in keys_data.get("keys", []):
-                if key_info.get("provider") == provider and key_info.get("source") == "byok":
-                    byok = True
-                    break
+        # _api_request returns a dict like {"keys": [...]}
+        for key_info in keys_resp.get("keys", []):
+            if key_info.get("provider") == provider and key_info.get("source") == "byok":
+                byok = True
+                break
     except Exception:
         pass
 
-    result = {
+    return {
         "operation": operation,
         "count": count,
         "provider": provider,
@@ -1239,7 +1236,6 @@ async def _handle_nrv_estimate_cost(arguments: dict) -> list[dict]:
             else f"{estimated_credits} credits (~${estimated_usd:.2f})"
         ),
     }
-    return [{"type": "text", "text": json.dumps(result, indent=2)}]
 
 
 # Handler dispatch table
