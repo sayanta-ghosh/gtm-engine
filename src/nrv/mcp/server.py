@@ -275,7 +275,7 @@ TOOLS: list[dict[str, Any]] = [
                     ),
                 },
             },
-            "required": ["query"],
+            "required": [],
         },
     },
     # ---- Enrichment ----
@@ -1469,7 +1469,7 @@ def handle_jsonrpc_request(request: dict) -> dict | None:
             )
 
         try:
-            global _current_tool_name
+            global _current_tool_name, WORKFLOW_LABEL
             _current_tool_name = tool_name
             result = handler(tool_args)
 

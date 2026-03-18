@@ -26,7 +26,7 @@ These are battle-tested workflows that have delivered real pipeline for real com
    ```
 5. **Research the prospect's context** — what are they evaluating? What content did they engage with?
    ```
-   nrv_parallel_research("What challenges is [company] facing in [domain]?")
+   nrv_scrape_page(url="https://www.google.com/search?q=challenges+facing+company", objective="What challenges is [company] facing in [domain]?")
    ```
 6. **Craft battlecard-informed outreach** — lead with specific differentiation vs the competitor they're already talking to
 
@@ -126,7 +126,7 @@ These are battle-tested workflows that have delivered real pipeline for real com
    - Person enrichment (Apollo: title, email, phone)
    - Web research (Parallel Web: recent news, blog posts, social activity)
    ```
-   nrv_parallel_research("What are the biggest technical challenges facing [company]?")
+   nrv_scrape_page(url="https://www.google.com/search?q=technical+challenges", objective="What are the biggest technical challenges facing [company]?")
    ```
 3. **Identify personalization angles** for each prospect:
    - Recent funding → "Congrats on the Series B..."
@@ -150,15 +150,15 @@ These are battle-tested workflows that have delivered real pipeline for real com
    nrv_google_search("site:instagram.com bakeries San Jose")
    nrv_google_search("site:instagram.com/p bakery San Jose")  # /p for posts
    ```
-2. **Discover via Google Maps / Yelp**
+2. **Discover via Yelp / Instagram** (Note: Google Maps site: does NOT work reliably)
    ```
    nrv_google_search("site:yelp.com bakeries San Jose")
-   nrv_google_search("bakeries San Jose site:google.com/maps")
+   nrv_google_search("site:instagram.com bakeries San Jose")
    ```
 3. **Enrich discovered businesses** — get website, email, phone
    ```
    nrv_scrape_page(url="[instagram profile or yelp listing]")
-   nrv_parallel_research("Find contact information for [business name] in San Jose")
+   nrv_scrape_page(url="https://www.google.com/search?q=business+name+San+Jose+contact", objective="Find contact information for this business")
    ```
 4. **Build structured list** — name, address, website, email, phone, Instagram handle
 5. **Score and prioritize** — by engagement metrics, review count, or other quality signals

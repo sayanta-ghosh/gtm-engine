@@ -96,8 +96,6 @@ nrv is designed for one-off brilliant executions on Claude Code. After deliverin
 Reference supporting files for detailed provider knowledge and workflow patterns:
 - `use-cases.md` — Proven GTM use cases with step-by-step execution
 - `non-standard-discovery.md` — Creative search patterns for non-database businesses
-- `provider-decision-matrix.md` — When to use which provider with specific criteria
-- `workflow-chains.md` — Multi-provider pipeline templates
 
 Tool-specific skills (API quirks, field formats, gotchas):
 - `../tool-skills/apollo-quirks.md` — Apollo API field formats, filter behaviors, gotchas

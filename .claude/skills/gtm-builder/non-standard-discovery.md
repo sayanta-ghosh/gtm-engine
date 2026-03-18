@@ -76,7 +76,7 @@ nrv_google_search("[Business Name] [City] phone website email contact")
 ```python
 # For businesses missing email/website, use Parallel Web Task API
 # Task API does AI-powered research across multiple sources
-nrv_parallel_research("Find contact email, website, and owner name for [Business Name] at [Address] in [City]")
+nrv_scrape_page(url="https://www.google.com/search?q=", objective="Find contact email, website, and owner name for [Business Name] at [Address] in [City]")
 
 # For persistent gaps, try Facebook pages (often have email)
 nrv_google_search("site:facebook.com [Business Name] [City]")

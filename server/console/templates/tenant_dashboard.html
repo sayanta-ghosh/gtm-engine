@@ -882,7 +882,6 @@
                 {% endif %}
             </div>
         </div>
-    </div>
 
         <!-- ============================================ -->
         <!-- TAB: Dashboards                              -->
@@ -890,12 +889,12 @@
         <div class="tab-content {% if active_tab == 'dashboards' %}active{% endif %}" id="tab-dashboards">
             <div class="stats-row">
                 <div class="stat-card">
-                    <div class="stat-number">{{ dashboards_summary.total_dashboards|default(0) }}</div>
-                    <div class="stat-label">Dashboards</div>
+                    <div class="value">{{ dashboards_summary.total_dashboards|default(0) }}</div>
+                    <div class="label">Dashboards</div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-number" style="font-size:14px;color:#818cf8;">server-rendered</div>
-                    <div class="stat-label">Hosting</div>
+                    <div class="value" style="font-size:14px;color:#818cf8;">server-rendered</div>
+                    <div class="label">Hosting</div>
                 </div>
             </div>
 
@@ -966,6 +965,8 @@
             </div>
             {% endif %}
         </div>
+
+    </div> <!-- /.container -->
 
     <script>
         const TENANT_ID = '{{ tenant_id }}';
