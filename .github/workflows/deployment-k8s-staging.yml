@@ -35,6 +35,5 @@ jobs:
 
       - name: Deploy to Kubernetes
         run: |
-          echo "${{ secrets.KUBECONFIG_STAGING }}" > kubeconfig_staging
-          export KUBECONFIG=kubeconfig_staging
+          aws eks update-kubeconfig --name staging-eks --region ap-south-1
           kubectl rollout restart deploy nrv-api -n staging
