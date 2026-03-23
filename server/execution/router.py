@@ -8,7 +8,7 @@ import time
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -42,6 +42,14 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["execute"])
 
 # ---------------------------------------------------------------------------
+# V1 batch size cap — prevents long-running requests during rolling restarts.
+# 25 records ≈ 10-15s execution (safe within 30s grace window).
+# V2: async job queue for larger batches.
+# ---------------------------------------------------------------------------
+
+MAX_BATCH_SIZE = 25
+
+# ---------------------------------------------------------------------------
 # In-memory batch store (replace with Redis/DB in production)
 # ---------------------------------------------------------------------------
 
@@ -58,6 +66,7 @@ _batches: dict[str, dict[str, Any]] = {}
     dependencies=[Depends(require_credits(1.0))],
 )
 async def execute_operation(
+    request: Request,
     body: ExecuteRequest,
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
@@ -77,9 +86,11 @@ async def execute_operation(
     estimated_cost = calculate_cost(body.operation, body.params)
 
     # Step 1: Hold credits (hold the estimated cost upfront)
+    workflow_id = request.headers.get("X-Workflow-Id") or getattr(request.state, "workflow_id", None)
+    user_id = getattr(request.state, "user_id", None)
     hold_id: int | None = None
     try:
-        hold_id = await check_and_hold(db, tenant.id, estimated_cost, body.operation)
+        hold_id = await check_and_hold(db, tenant.id, estimated_cost, body.operation, workflow_id=workflow_id, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
@@ -240,6 +251,7 @@ async def estimate_cost(
     dependencies=[Depends(require_credits(1.0))],
 )
 async def execute_batch_endpoint(
+    request: Request,
     body: BatchExecuteRequest,
     tenant: Tenant = Depends(get_current_tenant),
     db: AsyncSession = Depends(get_db),
@@ -261,6 +273,16 @@ async def execute_batch_endpoint(
             detail="No operations provided",
         )
 
+    if len(body.operations) > MAX_BATCH_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Batch size {len(body.operations)} exceeds maximum of "
+                f"{MAX_BATCH_SIZE} records. Split into smaller batches or "
+                f"use nRev for large-scale operations."
+            ),
+        )
+
     # All operations must be the same type for concurrent execution
     operation = body.operations[0].operation
     provider = body.operations[0].provider
@@ -271,9 +293,11 @@ async def execute_batch_endpoint(
     )
 
     # Hold credits for the full batch
+    workflow_id = request.headers.get("X-Workflow-Id") or getattr(request.state, "workflow_id", None)
+    user_id = getattr(request.state, "user_id", None)
     hold_id: int | None = None
     try:
-        hold_id = await check_and_hold(db, tenant.id, total_estimated_cost, "batch")
+        hold_id = await check_and_hold(db, tenant.id, total_estimated_cost, "batch", workflow_id=workflow_id, user_id=user_id)
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,

@@ -1,4 +1,4 @@
-"""Main FastAPI application for the nrv API."""
+"""Main FastAPI application for the nrev-lite API."""
 
 from __future__ import annotations
 
@@ -42,6 +42,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     await redis_pool.ping()
 
+    # Load dynamic search patterns from DB into memory cache
+    try:
+        from sqlalchemy import select as sa_select
+        from server.execution.learning_models import DynamicKnowledge
+        from server.execution.search_patterns import load_dynamic_patterns
+        from server.core.database import async_session_factory
+
+        async with async_session_factory() as db:
+            result = await db.execute(
+                sa_select(DynamicKnowledge).where(
+                    DynamicKnowledge.category == "search_pattern",
+                    DynamicKnowledge.enabled == True,  # noqa: E712
+                )
+            )
+            rows = result.scalars().all()
+            patterns = {row.key: row.knowledge for row in rows}
+            load_dynamic_patterns(patterns)
+    except Exception:
+        pass  # Table may not exist yet during initial setup
+
     yield
 
     # Shutdown
@@ -55,7 +75,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 # ---------------------------------------------------------------------------
 
 app = FastAPI(
-    title="nrv API",
+    title="nrev-lite API",
     version="0.1.0",
     description="Agent-native GTM execution platform",
     lifespan=lifespan,
@@ -65,10 +85,19 @@ app = FastAPI(
 # Middleware
 # ---------------------------------------------------------------------------
 
-# CORS - allow all origins in development, restrict in production
+# CORS - allow all origins in development, restrict to configured origins in production
+if settings.ENVIRONMENT == "development":
+    _cors_origins: list[str] = ["*"]
+else:
+    _cors_origins = [
+        o.strip()
+        for o in settings.CORS_ALLOWED_ORIGINS.split(",")
+        if o.strip()
+    ]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"] if settings.ENVIRONMENT == "development" else [],
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -98,6 +127,10 @@ from server.execution.schedule_router import router as schedules_router  # noqa:
 from server.feedback.router import router as feedback_router  # noqa: E402
 from server.vault.router import router as keys_router  # noqa: E402
 from server.apps.router import router as apps_router  # noqa: E402
+from server.execution.script_router import router as scripts_router  # noqa: E402
+from server.execution.learning_router import router as learning_router  # noqa: E402
+from server.connections.models import UserConnection  # noqa: E402, F401 — register model
+from server.admin.router import router as admin_router  # noqa: E402
 
 app.include_router(auth_router)
 app.include_router(execute_router)
@@ -108,7 +141,10 @@ app.include_router(credits_router)
 app.include_router(dashboards_router)
 app.include_router(datasets_router)
 app.include_router(schedules_router)
+app.include_router(scripts_router)
+app.include_router(learning_router)
 app.include_router(feedback_router)
+app.include_router(admin_router)
 app.include_router(apps_router)
 app.include_router(console_router)
 
